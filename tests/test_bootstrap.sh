@@ -2,8 +2,9 @@
 # Bootstrap script to launch LLDB with testing environment for objc_breakpoint
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HELLO_WORLD_PATH="$SCRIPT_DIR/HelloWorld/HelloWorld/HelloWorld"
-OBJC_BREAKPOINT_PATH="$SCRIPT_DIR/objc_breakpoint.py"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+HELLO_WORLD_PATH="$PROJECT_ROOT/examples/HelloWorld/HelloWorld/HelloWorld"
+OBJC_BREAKPOINT_PATH="$PROJECT_ROOT/objc_breakpoint.py"
 
 # Verify paths
 if [ ! -f "$HELLO_WORLD_PATH" ]; then
@@ -37,10 +38,8 @@ run
 # Load IDS.framework (this will load the Objective-C runtime and IDS private classes)
 expr (void)dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", 0x2)
 
-# Import the objc_breakpoint script
-command script import $OBJC_BREAKPOINT_PATH
-
 # Display help
+# Note: objc_breakpoint.py and objc_find.py are auto-loaded from ~/.lldbinit
 script print("\\n=== Ready for testing! ===\\n")
 script print("Available commands:\\n")
 script print("  obrk -[ClassName selector:]  - Set breakpoint on instance method")

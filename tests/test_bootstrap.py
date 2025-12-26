@@ -15,12 +15,13 @@ import os
 
 # Get the script directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
 
 # Path to HelloWorld binary
-hello_world_path = os.path.join(script_dir, "HelloWorld/HelloWorld/HelloWorld")
+hello_world_path = os.path.join(project_root, "examples/HelloWorld/HelloWorld/HelloWorld")
 
 # Path to objc_breakpoint.py
-objc_breakpoint_path = os.path.join(script_dir, "objc_breakpoint.py")
+objc_breakpoint_path = os.path.join(project_root, "objc_breakpoint.py")
 
 # Verify paths exist
 if not os.path.exists(hello_world_path):
@@ -50,10 +51,8 @@ run
 # Load IDS.framework (this will load the Objective-C runtime and IDS private classes)
 expr (void)dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", 0x2)
 
-# Import the objc_breakpoint script
-command script import {objc_breakpoint_path}
-
 # Display help
+# Note: objc_breakpoint.py and objc_find.py are auto-loaded from ~/.lldbinit
 script print("\\n=== Ready for testing! ===\\n")
 script print("Available commands:\\n")
 script print("  obrk -[ClassName selector:]  - Set breakpoint on instance method")
