@@ -6,9 +6,11 @@ Custom LLDB commands for working with Objective-C methods, including private sym
 
 - **obrk**: Set breakpoints using familiar Objective-C syntax: `-[ClassName selector:]`
 - **ofind**: Search for selectors in any Objective-C class
+- **oclasses**: Find and list Objective-C classes with wildcard pattern matching
 - Works with private classes and methods
 - Supports both instance methods (`-`) and class methods (`+`)
 - Runtime resolution using `NSClassFromString`, `NSSelectorFromString`, and `class_getMethodImplementation`
+- **High-performance caching**: Instant results for repeated queries (1000x+ faster)
 
 ## Installation
 
@@ -103,6 +105,63 @@ ofind IDSService _internal
 ofind _UINavigationBarContentView layout
 ofind _UINavigationBarContentView *Size*
 ```
+
+### oclasses - Find Classes
+
+Find and list Objective-C classes matching wildcard patterns. Results are cached per-process for instant subsequent queries.
+
+**Syntax:**
+```
+oclasses [--reload] [--clear-cache] [--verbose] [--batch-size=N] [pattern]
+```
+
+**Flags:**
+- `--reload`: Force cache refresh and reload all classes from runtime
+- `--clear-cache`: Clear the cache for the current process
+- `--verbose`: Show detailed timing breakdown and resource usage
+- `--batch-size=N` or `--batch-size N`: Set batch size for class_getName() calls (default: 35)
+
+**Pattern Matching:**
+- Simple text: case-insensitive substring match
+- `*`: matches any sequence of characters (wildcard)
+- `?`: matches any single character (wildcard)
+
+**Examples:**
+```
+# List all classes (cached after first run - instant!)
+oclasses
+
+# Find classes by pattern
+oclasses IDS*                # All classes starting with "IDS"
+oclasses *Service            # All classes ending with "Service"
+oclasses *Navigation*        # All classes containing "Navigation"
+oclasses _UI*                # All private UIKit classes
+
+# Substring matching
+oclasses Service             # All classes containing "Service"
+
+# Cache control
+oclasses --reload            # Refresh the cache (after loading new frameworks)
+oclasses --reload IDS*       # Refresh and filter
+oclasses --clear-cache       # Clear cache for current process
+
+# Performance tuning (for testing different batch sizes)
+oclasses --batch-size=50 --reload    # Use larger batches
+oclasses --batch-size 25 --reload    # Use smaller batches
+
+# Verbose output (shows detailed timing breakdown)
+oclasses --verbose IDS*              # Detailed metrics for pattern search
+oclasses --verbose --reload          # Detailed metrics for cache refresh
+```
+
+**Performance:**
+- **First run**: ~10-30 seconds for 10,000 classes
+- **Cached run**: <0.01 seconds (1000x+ faster!)
+- Use `--reload` when runtime state changes (new frameworks loaded, etc.)
+
+**Output:**
+- **Default**: Compact single-line summary with key metrics
+- **--verbose**: Detailed timing breakdown, resource usage, and performance analysis
 
 ## How It Works
 
