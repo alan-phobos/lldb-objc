@@ -1,13 +1,13 @@
-# oclasses Output Formats
+# ocls Output Formats
 
-The `oclasses` command supports two output modes: **compact** (default) and **verbose** (with `--verbose` flag).
+The `ocls` command supports two output modes: **compact** (default) and **verbose** (with `--verbose` flag).
 
 ## Compact Output (Default)
 
 The default output is clean and minimal, showing only essential information on a single line:
 
 ```
-(lldb) oclasses IDS*
+(lldb) ocls IDS*
 Found 47 class(es) matching: IDS*:
   IDSAccount
   IDSAccountController
@@ -20,7 +20,7 @@ Found 47 class(es) matching: IDS*:
 
 **Cached results are even more concise:**
 ```
-(lldb) oclasses IDS*
+(lldb) ocls IDS*
 Found 47 class(es) matching: IDS*:
   IDSAccount
   IDSAccountController
@@ -43,7 +43,7 @@ The single-line summary shows:
 For detailed performance analysis and debugging, use the `--verbose` flag:
 
 ```
-(lldb) oclasses --verbose IDS*
+(lldb) ocls --verbose IDS*
 Found 47 class(es) matching: IDS*:
   IDSAccount
   IDSAccountController
@@ -72,7 +72,7 @@ Performance Summary:
 
 **Verbose output for cached results:**
 ```
-(lldb) oclasses --verbose IDS*
+(lldb) ocls --verbose IDS*
 Found 47 class(es) matching: IDS*:
   IDSAccount
   IDSAccountController
@@ -122,11 +122,11 @@ The detailed summary includes:
 
 ```bash
 # Compact output (default)
-oclasses NSString                    # Quick lookup
-oclasses *Service                    # Quick pattern search
+ocls NSString                    # Quick lookup
+ocls *Service                    # Quick pattern search
 
 # Verbose output for analysis
-oclasses --verbose --reload          # See detailed metrics for full reload
-oclasses --verbose --batch-size=50   # Compare performance with different batch sizes
-oclasses --verbose IDS*              # Analyze performance of filtered search
+ocls --verbose --reload          # See detailed metrics for full reload
+ocls --verbose --batch-size=50   # Compare performance with different batch sizes
+ocls --verbose IDS*              # Analyze performance of filtered search
 ```

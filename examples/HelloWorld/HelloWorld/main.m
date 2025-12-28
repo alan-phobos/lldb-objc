@@ -1,6 +1,10 @@
 #import <Foundation/Foundation.h>
 
-@interface Greeter : NSObject
+@interface Greeter : NSObject {
+    NSString *_greeting;
+    NSDictionary *_metadata;
+    NSInteger _count;
+}
 - (void)sayHello:(NSString *)name;
 - (NSInteger)add:(NSInteger)a to:(NSInteger)b;
 @end

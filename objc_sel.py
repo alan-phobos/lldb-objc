@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 LLDB script for finding selectors in Objective-C classes.
-Usage: ofind ClassName [pattern]
-       ofind ClassName           # List all selectors
-       ofind ClassName service   # Find selectors containing 'service'
-       ofind ClassName *ternal   # Find selectors ending with 'ternal' (wildcard)
-       ofind ClassName _init*    # Find selectors starting with '_init' (wildcard)
-       ofind ClassName *set*     # Find selectors containing 'set' anywhere (wildcard)
+Usage: osel ClassName [pattern]
+       osel ClassName           # List all selectors
+       osel ClassName service   # Find selectors containing 'service'
+       osel ClassName *ternal   # Find selectors ending with 'ternal' (wildcard)
+       osel ClassName _init*    # Find selectors starting with '_init' (wildcard)
+       osel ClassName *set*     # Find selectors containing 'set' anywhere (wildcard)
 
 Pattern matching:
   - Simple text: substring match (case-insensitive)
@@ -45,7 +45,7 @@ def find_objc_selectors(debugger, command, result, internal_dict):
     args = command.strip().split(None, 1)
 
     if len(args) < 1:
-        result.SetError("Usage: ofind ClassName [pattern]")
+        result.SetError("Usage: osel ClassName [pattern]")
         return
 
     class_name = args[0]
@@ -143,8 +143,7 @@ def get_methods(frame, class_ptr, is_instance=True, pattern=None):
     Get all methods for a class using class_copyMethodList.
     Returns a list of selector names.
     """
-    # Get method count
-    count_expr = f'(unsigned int)0'
+    # Allocate space for method count
     count_var_expr = f'(unsigned int *)malloc(sizeof(unsigned int))'
     count_var_result = frame.EvaluateExpression(count_var_expr)
 
@@ -205,8 +204,10 @@ def get_methods(frame, class_ptr, is_instance=True, pattern=None):
         if sel_name_result.IsValid() and not sel_name_result.GetError().Fail():
             sel_name = sel_name_result.GetSummary()
             if sel_name:
-                # Remove quotes from the string
-                sel_name = sel_name.strip('"')
+                # Remove outer quotes (exactly one from each end)
+                # Note: Don't use strip('"') - it removes ALL consecutive quotes
+                if sel_name.startswith('"') and sel_name.endswith('"'):
+                    sel_name = sel_name[1:-1]
 
                 # Apply pattern filter if provided
                 if matches_pattern(sel_name, pattern):
@@ -222,7 +223,7 @@ def get_methods(frame, class_ptr, is_instance=True, pattern=None):
 def __lldb_init_module(debugger, internal_dict):
     """Initialize the module by registering the command."""
     debugger.HandleCommand(
-        'command script add -f objc_find.find_objc_selectors ofind'
+        'command script add -f objc_sel.find_objc_selectors osel'
     )
-    print(f"[lldb-objc v{__version__}] Objective-C selector finder command 'ofind' has been installed.")
-    print("Usage: ofind ClassName [pattern]")
+    print(f"[lldb-objc v{__version__}] Objective-C selector finder command 'osel' has been installed.")
+    print("Usage: osel ClassName [pattern]")

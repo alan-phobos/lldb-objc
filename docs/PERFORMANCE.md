@@ -2,7 +2,7 @@
 
 ## Summary
 
-The `oclasses` command is optimized for enumerating ~10,000 Objective-C classes efficiently.
+The `ocls` command is optimized for enumerating ~10,000 Objective-C classes efficiently.
 
 ### Performance Results
 
@@ -51,7 +51,7 @@ Symbol tables are **slower and less reliable**:
 ## Usage
 
 ```bash
-oclasses                      # Use cache (instant after first run)
-oclasses --reload             # Force refresh
-oclasses --batch-size=50      # Override batch size
+ocls                      # Use cache (instant after first run)
+ocls --reload             # Force refresh
+ocls --batch-size=50      # Override batch size
 ```

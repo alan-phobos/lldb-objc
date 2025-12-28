@@ -12,17 +12,17 @@ Or load manually:
 ```
 (lldb) command script import /path/to/objc_breakpoint.py
 (lldb) command script import /path/to/objc_find.py
-(lldb) command script import /path/to/objc_classes.py
+(lldb) command script import /path/to/objc_cls.py
 ```
 
 ## Commands
 
-### Find Classes (`oclasses`)
+### Find Classes (`ocls`)
 ```bash
-oclasses                    # List all classes (cached after first run)
-oclasses IDS*               # Classes starting with "IDS"
-oclasses *Service           # Classes ending with "Service"
-oclasses --reload           # Force cache refresh
+ocls                    # List all classes (cached after first run)
+ocls IDS*               # Classes starting with "IDS"
+ocls *Service           # Classes ending with "Service"
+ocls --reload           # Force cache refresh
 ```
 
 ### Find Methods (`ofind`)
@@ -42,7 +42,7 @@ obrk +[NSDate date]                # Class method
 
 1. **Discover classes:**
    ```
-   oclasses IDS*
+   ocls IDS*
    ```
 
 2. **Explore methods:**

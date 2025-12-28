@@ -5,8 +5,8 @@ Custom LLDB commands for working with Objective-C methods, including private sym
 ## Features
 
 - **obrk**: Set breakpoints using familiar Objective-C syntax: `-[ClassName selector:]`
-- **ofind**: Search for selectors in any Objective-C class
-- **oclasses**: Find and list Objective-C classes with wildcard pattern matching
+- **osel**: Search for selectors in any Objective-C class
+- **ocls**: Find and list Objective-C classes with wildcard pattern matching
 - Works with private classes and methods
 - Supports both instance methods (`-`) and class methods (`+`)
 - Runtime resolution using `NSClassFromString`, `NSSelectorFromString`, and `class_getMethodImplementation`
@@ -39,13 +39,15 @@ If you prefer to manually configure your installation:
 1. Load the scripts in LLDB:
 ```
 command script import /path/to/objc_breakpoint.py
-command script import /path/to/objc_find.py
+command script import /path/to/objc_sel.py
+command script import /path/to/objc_cls.py
 ```
 
 2. Or add to your `~/.lldbinit` file for automatic loading:
 ```
 command script import /path/to/lldb-objc/objc_breakpoint.py
-command script import /path/to/lldb-objc/objc_find.py
+command script import /path/to/lldb-objc/objc_sel.py
+command script import /path/to/lldb-objc/objc_cls.py
 ```
 
 ## Usage
@@ -69,14 +71,14 @@ obrk +[NSString stringWithFormat:]
 obrk -[_UIPrivateClass privateMethod:]
 ```
 
-### ofind - Find Selectors
+### osel - Find Selectors
 
 Search for selectors in any Objective-C class, including private classes.
 
 **Syntax:**
 ```
-ofind ClassName              # List all selectors
-ofind ClassName pattern      # Filter by pattern (substring or wildcard)
+osel ClassName              # List all selectors
+osel ClassName pattern      # Filter by pattern (substring or wildcard)
 ```
 
 **Pattern Matching:**
@@ -87,32 +89,32 @@ ofind ClassName pattern      # Filter by pattern (substring or wildcard)
 **Examples:**
 ```
 # List all methods in IDSService
-ofind IDSService
+osel IDSService
 
 # Substring matching - find selectors containing "service"
-ofind IDSService service
+osel IDSService service
 
 # Wildcard patterns
-ofind IDSService *ternal      # Selectors ending with 'ternal'
-ofind IDSService _init*       # Selectors starting with '_init'
-ofind IDSService *set*        # Selectors containing 'set' anywhere
+osel IDSService *ternal      # Selectors ending with 'ternal'
+osel IDSService _init*       # Selectors starting with '_init'
+osel IDSService *set*        # Selectors containing 'set' anywhere
 
 # Find specific selectors
-ofind IDSService serviceIdentifier
-ofind IDSService _internal
+osel IDSService serviceIdentifier
+osel IDSService _internal
 
 # Works with private classes too
-ofind _UINavigationBarContentView layout
-ofind _UINavigationBarContentView *Size*
+osel _UINavigationBarContentView layout
+osel _UINavigationBarContentView *Size*
 ```
 
-### oclasses - Find Classes
+### ocls - Find Classes
 
-Find and list Objective-C classes matching wildcard patterns. Results are cached per-process for instant subsequent queries.
+Find and list Objective-C classes matching patterns. Results are cached per-process for instant subsequent queries. Uses fast-path lookup for exact matches. Automatically shows class hierarchy information based on the number of matches.
 
 **Syntax:**
 ```
-oclasses [--reload] [--clear-cache] [--verbose] [--batch-size=N] [pattern]
+ocls [--reload] [--clear-cache] [--verbose] [--batch-size=N] [pattern]
 ```
 
 **Flags:**
@@ -122,46 +124,50 @@ oclasses [--reload] [--clear-cache] [--verbose] [--batch-size=N] [pattern]
 - `--batch-size=N` or `--batch-size N`: Set batch size for class_getName() calls (default: 35)
 
 **Pattern Matching:**
-- Simple text: case-insensitive substring match
-- `*`: matches any sequence of characters (wildcard)
-- `?`: matches any single character (wildcard)
+- No wildcards: exact match (case-sensitive) - uses fast-path NSClassFromString lookup
+- `*`: matches any sequence of characters (case-insensitive wildcard)
+- `?`: matches any single character (case-insensitive wildcard)
 
 **Examples:**
 ```
 # List all classes (cached after first run - instant!)
-oclasses
+ocls
 
-# Find classes by pattern
-oclasses IDS*                # All classes starting with "IDS"
-oclasses *Service            # All classes ending with "Service"
-oclasses *Navigation*        # All classes containing "Navigation"
-oclasses _UI*                # All private UIKit classes
+# Exact match (fast-path - bypasses full enumeration)
+ocls IDSService          # Exact match for "IDSService" class (<0.01s)
+ocls UIViewController    # Shows: UIViewController → UIResponder → NSObject
 
-# Substring matching
-oclasses Service             # All classes containing "Service"
+# Wildcard patterns (uses cache or full enumeration)
+ocls IDS*                # All classes starting with "IDS"
+ocls *Service            # All classes ending with "Service"
+ocls *Navigation*        # All classes containing "Navigation"
+ocls _UI*                # All private UIKit classes
 
 # Cache control
-oclasses --reload            # Refresh the cache (after loading new frameworks)
-oclasses --reload IDS*       # Refresh and filter
-oclasses --clear-cache       # Clear cache for current process
+ocls --reload            # Refresh the cache (after loading new frameworks)
+ocls --reload IDS*       # Refresh and filter
+ocls --clear-cache       # Clear cache for current process
 
 # Performance tuning (for testing different batch sizes)
-oclasses --batch-size=50 --reload    # Use larger batches
-oclasses --batch-size 25 --reload    # Use smaller batches
+ocls --batch-size=50 --reload    # Use larger batches
+ocls --batch-size 25 --reload    # Use smaller batches
 
 # Verbose output (shows detailed timing breakdown)
-oclasses --verbose IDS*              # Detailed metrics for pattern search
-oclasses --verbose --reload          # Detailed metrics for cache refresh
+ocls --verbose IDS*              # Detailed metrics for pattern search
+ocls --verbose --reload          # Detailed metrics for cache refresh
 ```
 
 **Performance:**
-- **First run**: ~10-30 seconds for 10,000 classes
+- **Fast-path (exact match)**: <0.01 seconds (bypasses full enumeration)
+- **First run with wildcards**: ~10-30 seconds for 10,000 classes
 - **Cached run**: <0.01 seconds (1000x+ faster!)
 - Use `--reload` when runtime state changes (new frameworks loaded, etc.)
 
-**Output:**
-- **Default**: Compact single-line summary with key metrics
-- **--verbose**: Detailed timing breakdown, resource usage, and performance analysis
+**Output Modes (based on number of matches):**
+- **1 match**: Detailed view showing full class hierarchy chain
+- **2-20 matches**: Compact one-liner showing hierarchy for each class
+- **21+ matches**: Simple class name list
+- **--verbose**: Adds detailed timing breakdown and resource usage to any mode
 
 ## How It Works
 
@@ -195,7 +201,7 @@ oclasses --verbose --reload          # Detailed metrics for cache refresh
 Test files and test cases can be found in the [tests/](tests/) directory:
 - [test_bootstrap.py](tests/test_bootstrap.py) - Test bootstrap script
 - [test_bootstrap.sh](tests/test_bootstrap.sh) - Shell script for bootstrapping tests
-- [test_ofind.py](tests/test_ofind.py) - Test suite for ofind command
+- [test_osel.py](tests/test_osel.py) - Test suite for osel command
 - [test_runner.md](tests/test_runner.md) - Test cases documentation
 
 ## Examples

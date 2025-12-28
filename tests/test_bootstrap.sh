@@ -17,10 +17,7 @@ if [ ! -f "$OBJC_BREAKPOINT_PATH" ]; then
     exit 1
 fi
 
-echo "Launching LLDB with HelloWorld binary..."
-echo "Binary path: $HELLO_WORLD_PATH"
-echo "Script path: $OBJC_BREAKPOINT_PATH"
-echo
+# Quiet launch - binary verification already done above
 
 # Create temporary LLDB command file
 TEMP_FILE=$(mktemp /tmp/lldb_commands.XXXXXX)
@@ -39,12 +36,17 @@ run
 expr (void)dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", 0x2)
 
 # Display help
-# Note: objc_breakpoint.py and objc_find.py are auto-loaded from ~/.lldbinit
+# Note: All objc_*.py commands are auto-loaded from ~/.lldbinit
 script print("\\n=== Ready for testing! ===\\n")
 script print("Available commands:\\n")
 script print("  obrk -[ClassName selector:]  - Set breakpoint on instance method")
-script print("  obrk +[ClassName selector:]  - Set breakpoint on class method\\n")
-script print("Example: obrk -[IDSService init]\\n")
+script print("  obrk +[ClassName selector:]  - Set breakpoint on class method")
+script print("  osel ClassName [pattern]     - Find selectors in a class")
+script print("  ocls [pattern]               - Find classes (supports wildcards)\\n")
+script print("Examples:")
+script print("  obrk -[IDSService init]")
+script print("  osel IDSService")
+script print("  ocls IDS*\\n")
 EOF
 
 # Launch LLDB with the command file
