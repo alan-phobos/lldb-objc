@@ -253,6 +253,95 @@ def validate_metaclass():
     return validator
 
 
+def validate_autodetect_class_method():
+    """Validator for auto-detecting class methods (bare bracket syntax)."""
+    def validator(output):
+        # Must detect as class method, NOT instance method
+        if 'Auto-detect: Class method +[NSDate date]' in output:
+            if 'Breakpoint #' in output and '+[NSDate date]' in output:
+                return True, "Auto-detected as class method correctly"
+            return False, (f"Auto-detected correctly but breakpoint not set\n"
+                          f"    Expected: 'Breakpoint #' and '+[NSDate date]'\n"
+                          f"    Output preview: {output[:400]}")
+        elif 'Auto-detect: Defaulting to instance method' in output:
+            return False, (f"Incorrectly auto-detected as instance method\n"
+                          f"    Expected: 'Auto-detect: Class method +[NSDate date]'\n"
+                          f"    Actual: Defaulted to instance method\n"
+                          f"    Bug: [NSDate date] is a class method, not instance method\n"
+                          f"    Output preview: {output[:400]}")
+        elif 'Auto-detect: Instance method' in output:
+            return False, (f"Incorrectly auto-detected as instance method\n"
+                          f"    Expected: 'Auto-detect: Class method +[NSDate date]'\n"
+                          f"    Actual: Detected as instance method\n"
+                          f"    Output preview: {output[:400]}")
+        return False, (f"Auto-detection output not found\n"
+                      f"    Expected: 'Auto-detect:' message in output\n"
+                      f"    Output preview: {output[:400]}")
+    return validator
+
+
+def validate_msgforward_rejection():
+    """Validator for rejecting _objc_msgForward IMP addresses."""
+    def validator(output):
+        # Check for forwarding IMP in output (from br list or obrk's detection)
+        has_msgforward_in_br_list = '_objc_msgForward' in output
+
+        # If we set a breakpoint that resolves to _objc_msgForward, that's a bug!
+        if 'Breakpoint #' in output and has_msgforward_in_br_list:
+            return False, (f"BUG: Set breakpoint on _objc_msgForward\n"
+                          f"    Expected: Reject method that resolves to forwarding IMP\n"
+                          f"    Actual: Breakpoint set on forwarding stub\n"
+                          f"    This will break on ALL unimplemented messages!\n"
+                          f"    Output preview: {output[:400]}")
+
+        # Should detect forwarding IMP and report error
+        if 'error' in output.lower() or 'not found' in output.lower():
+            if 'forward' in output.lower() or '_objc_msgForward' in output:
+                return True, "Correctly detected and rejected forwarding IMP"
+            return True, "Rejected invalid method"
+
+        # If no breakpoint was set and no error visible, check if we detected forwarding
+        if 'forward' in output.lower():
+            return True, "Detected forwarding method"
+
+        return False, (f"Unexpected output\n"
+                      f"    Expected: Error about forwarding IMP or 'not found' message\n"
+                      f"    Output preview: {output[:400]}")
+    return validator
+
+
+def validate_superclass_detection():
+    """Validator for detecting when method resolves to superclass implementation."""
+    def validator(output):
+        # Must successfully set breakpoint
+        if 'Breakpoint #' not in output:
+            return False, (f"Breakpoint not set\n"
+                          f"    Expected: Breakpoint set with superclass note\n"
+                          f"    Actual: No breakpoint created\n"
+                          f"    Output preview: {output[:400]}")
+
+        # Should detect and report that it's inherited from NSObject
+        # Look for "inherited from" message in the IMP line
+        if 'inherited from' in output.lower():
+            if 'NSObject' in output:
+                return True, "Correctly detected superclass implementation from NSObject"
+            return True, "Detected superclass implementation"
+
+        # Alternative: check if the br list shows +[NSObject hash] for the +[NSDate hash] breakpoint
+        # This would indicate the feature isn't implemented yet
+        if '+[NSObject hash]' in output and '+[NSDate hash]' in output:
+            return False, (f"Superclass detection not implemented\n"
+                          f"    Expected: 'inherited from' note when IMP is from superclass\n"
+                          f"    Actual: Breakpoint set but no inheritance info shown\n"
+                          f"    The IMP resolves to +[NSObject hash] but this wasn't reported\n"
+                          f"    Output preview: {output[:400]}")
+
+        return False, (f"Unexpected output\n"
+                      f"    Expected: 'inherited from' note for superclass method\n"
+                      f"    Output preview: {output[:400]}")
+    return validator
+
+
 # =============================================================================
 # Test Specifications
 # =============================================================================
@@ -335,6 +424,24 @@ def get_test_specs():
             ['obrk +[NSObject class]'],
             validate_metaclass()
         ),
+        # Auto-detect
+        (
+            "Auto-detect class method: [NSDate date]",
+            ['obrk [NSDate date]', 'breakpoint list'],
+            validate_autodetect_class_method()
+        ),
+        # Forwarding IMP detection
+        (
+            "Reject _objc_msgForward: [NSDate nonExistentMethod12345]",
+            ['obrk [NSDate nonExistentMethod12345]', 'breakpoint list'],
+            validate_msgforward_rejection()
+        ),
+        # Superclass implementation detection
+        (
+            "Superclass detection: +[NSDate hash] -> +[NSObject hash]",
+            ['obrk +[NSDate hash]', 'breakpoint list'],
+            validate_superclass_detection()
+        ),
     ]
 
 
@@ -347,6 +454,9 @@ def main():
         "Error handling": (5, 9),
         "Validation": (9, 12),
         "Edge cases": (12, 14),
+        "Auto-detect": (14, 15),
+        "Forwarding IMP detection": (15, 16),
+        "Superclass detection": (16, 17),
     }
 
     passed, total = run_shared_test_suite(

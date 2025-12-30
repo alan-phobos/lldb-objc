@@ -6,6 +6,7 @@ Usage: ocall +[ClassName selector:]           # Class method
        ocall -[$variable selector:]           # Instance method on variable
        ocall -[$register selector:]           # Instance method on register (e.g., $x0)
        ocall -[0x123456 selector:]            # Instance method on address
+       ocall [ClassName selector:]            # Auto-detect method type (+ or -)
        ocall --verbose +[ClassName selector:] # Shows resolution chain
 """
 
@@ -25,6 +26,37 @@ try:
     from version import __version__
 except ImportError:
     __version__ = "unknown"
+
+from objc_utils import detect_method_type as _detect_method_type_base
+
+
+def detect_method_type(
+    frame: lldb.SBFrame,
+    receiver: str,
+    selector_with_args: str,
+    verbose: bool = False
+) -> bool:
+    """
+    Auto-detect whether a method is a class method (+) or instance method (-).
+
+    Returns True for class method, False for instance method.
+
+    Logic:
+    - If receiver looks like an instance ($var, $reg, 0x...), it's an instance method
+    - Otherwise, delegates to shared detect_method_type in objc_utils
+    """
+    # If receiver is a variable, register, or address, it's definitely an instance method
+    if receiver.startswith('$') or receiver.startswith('0x') or receiver.isdigit():
+        if verbose:
+            print(f"Auto-detect: Instance method (receiver is {receiver})")
+        return False
+
+    # Receiver looks like a class name - extract selector and use shared detection
+    sel_name = extract_selector_name(selector_with_args)
+    # _detect_method_type_base returns True for instance, False for class
+    # We need to invert: return True for class method, False for instance
+    is_instance = _detect_method_type_base(frame, receiver, sel_name, verbose)
+    return not is_instance
 
 
 def call_objc_method(
@@ -53,12 +85,15 @@ def call_objc_method(
         command = command.split(None, 1)[1] if ' ' in command else ''
         command = command.strip()
 
-    # Validate basic syntax
-    if not (command.startswith('-[') or command.startswith('+[')):
+    # Validate basic syntax - support +[, -[, or just [ for auto-detect
+    if not (command.startswith('-[') or command.startswith('+[') or command.startswith('[')):
         result.SetError("Usage: ocall -[receiver selector:] or ocall +[ClassName selector:]\n"
+                       "       ocall [ClassName selector:]  (auto-detects + or -)\n"
                        "       ocall --verbose +[ClassName selector:]")
         return
 
+    # Determine if we need to auto-detect method type
+    auto_detect = command.startswith('[')
     is_class_method = command.startswith('+[')
 
     # Find the matching closing bracket
@@ -78,7 +113,9 @@ def call_objc_method(
         return
 
     # Extract the content between brackets
-    method_str = command[2:end_idx]
+    # For auto-detect mode, start at index 1 (skip '['), otherwise skip '+[' or '-['
+    start_idx = 1 if auto_detect else 2
+    method_str = command[start_idx:end_idx]
 
     # Split into receiver and selector+args
     # The receiver is the first token, rest is selector with args
@@ -94,6 +131,10 @@ def call_objc_method(
     # Get the current frame to evaluate expressions
     thread = process.GetSelectedThread()
     frame = thread.GetSelectedFrame()
+
+    # Auto-detect method type if not specified
+    if auto_detect:
+        is_class_method = detect_method_type(frame, receiver, selector_with_args, verbose)
 
     if is_class_method:
         # Class method: receiver is class name
@@ -303,41 +344,57 @@ def extract_selector_name(selector_with_args: str) -> str:
 
 def display_result(sbvalue: lldb.SBValue) -> None:
     """
-    Display an SBValue result in a readable format.
+    Display an SBValue result in a format matching LLDB's 'call' command output.
+    Format: (Type *) $N = 0x... description
+    The address is dimmed, matching the project's UI convention.
     """
+    # Get the address of the object
+    address = sbvalue.GetValueAsUnsigned()
+
+    # Dim gray ANSI code for address
+    DIM = "\033[90m"
+    RESET = "\033[0m"
+
     # Get the type
     type_name = sbvalue.GetTypeName()
 
+    # Get the variable name (e.g., $0, $1, etc.)
+    var_name = sbvalue.GetName()
+    if not var_name:
+        var_name = "$?"
+
     # Get the value representation
-    value = sbvalue.GetValue()
     summary = sbvalue.GetSummary()
     description = sbvalue.GetObjectDescription()
 
-    # Choose the best representation
+    # Format the address part (dimmed)
+    addr_str = f"{DIM}0x{address:x}{RESET}" if address != 0 else "0x0"
+
+    # Choose the best representation for the value
     if description:
         # Object description is usually the most informative for ObjC objects
-        print(f"({type_name}) {description}")
+        value_str = description
     elif summary:
-        print(f"({type_name}) {summary}")
-    elif value:
-        print(f"({type_name}) {value}")
+        value_str = summary
     else:
-        # Try to get the value as unsigned for pointers
-        unsigned_val = sbvalue.GetValueAsUnsigned()
-        if unsigned_val != 0:
-            print(f"({type_name}) 0x{unsigned_val:x}")
-        else:
-            print(f"({type_name}) <no value>")
+        value_str = None
+
+    # Output format: (Type *) $N = 0x... description
+    if value_str:
+        print(f"({type_name}) {var_name} = {addr_str} {value_str}")
+    else:
+        print(f"({type_name}) {var_name} = {addr_str}")
 
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the module by registering the command."""
     debugger.HandleCommand(
         'command script add -h "Call Objective-C methods. '
-        'Usage: ocall +[ClassName selector:] or ocall -[$variable selector:] [--verbose]" '
+        'Usage: ocall +[ClassName selector:] or ocall -[$variable selector:] or ocall [ClassName selector:] [--verbose]" '
         '-f objc_call.call_objc_method ocall'
     )
     print(f"[lldb-objc v{__version__}] Objective-C method caller command 'ocall' has been installed.")
     print("Usage: ocall +[ClassName selector:]")
     print("       ocall -[$variable selector:]")
+    print("       ocall [ClassName selector:]  (auto-detects + or -)")
     print("       ocall --verbose +[ClassName selector:]")

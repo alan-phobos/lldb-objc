@@ -104,8 +104,9 @@ def run_lldb_test(commands, scripts=None, timeout=30, load_ids_framework=True):
 
     # Setup commands
     cmd_args.extend(['-o', f'file {HELLO_WORLD_PATH}'])
-    cmd_args.extend(['-o', 'breakpoint set -n main'])
+    cmd_args.extend(['-o', 'breakpoint set -n "HelloWorld`main"'])
     cmd_args.extend(['-o', 'run'])
+    cmd_args.extend(['-o', 'breakpoint delete 1'])  # Clear the main breakpoint after hit
 
     if load_ids_framework:
         cmd_args.extend(['-o', 'expr (void)dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", 0x2)'])
@@ -365,6 +366,10 @@ class SharedLLDBSession:
         for cmd in init_commands:
             self.child.sendline(cmd)
             self.child.expect(r'\(lldb\)', timeout=60)
+
+        # Clear the main breakpoint after it's been hit
+        self.child.sendline('breakpoint delete 1')
+        self.child.expect(r'\(lldb\)')
 
     def run_command(self, cmd, timeout=None):
         """

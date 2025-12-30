@@ -55,28 +55,37 @@ def unquote_string(s: Optional[str]) -> Optional[str]:
 
 def parse_method_signature(command: str) -> Tuple[Optional[bool], Optional[str], Optional[str], Optional[str]]:
     """
-    Parse a method signature like -[ClassName selector:] or +[ClassName selector:]
+    Parse a method signature like -[ClassName selector:], +[ClassName selector:], or [ClassName selector:]
 
     Args:
         command: The method signature string
 
     Returns:
         Tuple of (is_instance_method, class_name, selector, error_message)
-        On error, is_instance_method/class_name/selector are None
+        - is_instance_method: True for -, False for +, None for auto-detect (bare [)
+        On error, all values are None except error_message
     """
     command = command.strip()
 
-    if not (command.startswith('-[') or command.startswith('+[')):
-        return None, None, None, "Expected -[ClassName selector:] or +[ClassName selector:]"
+    # Determine method type based on prefix
+    if command.startswith('-['):
+        is_instance_method = True
+        start_idx = 2
+    elif command.startswith('+['):
+        is_instance_method = False
+        start_idx = 2
+    elif command.startswith('['):
+        is_instance_method = None  # Signal auto-detect needed
+        start_idx = 1
+    else:
+        return None, None, None, "Expected -[ClassName selector:], +[ClassName selector:], or [ClassName selector:]"
 
-    is_instance_method = command.startswith('-[')
-
-    # Remove the leading -[ or +[ and trailing ]
-    method_str = command[2:-1] if command.endswith(']') else command[2:]
+    # Remove the leading prefix and trailing ]
+    method_str = command[start_idx:-1] if command.endswith(']') else command[start_idx:]
     parts = method_str.split(None, 1)  # Split on first whitespace
 
     if len(parts) != 2:
-        return None, None, None, "Invalid format. Expected: -[ClassName selector:]"
+        return None, None, None, "Invalid format. Expected: [ClassName selector:]"
 
     class_name = parts[0]
     selector = parts[1]
@@ -161,13 +170,84 @@ def resolve_method_address(
 
     imp_addr = imp_result.GetValueAsUnsigned()
 
-    if verbose:
-        print(f"  IMP: {imp_result.GetValue()}")
-
     if imp_addr == 0:
+        if verbose:
+            print(f"  IMP: {imp_result.GetValue()}")
         return 0, class_ptr, sel_ptr, "Method implementation not found"
 
+    # Step 5: Resolve symbol at IMP address to check for forwarding or inheritance
+    target = frame.GetThread().GetProcess().GetTarget()
+    addr = target.ResolveLoadAddress(imp_addr)
+    inherited_from = None
+
+    if addr.IsValid():
+        symbol = addr.GetSymbol()
+        if symbol.IsValid():
+            symbol_name = symbol.GetName()
+            if symbol_name:
+                # Check for forwarding stub
+                if 'msgForward' in symbol_name:
+                    if verbose:
+                        print(f"  IMP: {imp_result.GetValue()}")
+                    method_type = "instance" if is_instance_method else "class"
+                    return 0, class_ptr, sel_ptr, (
+                        f"Method not implemented: {method_type} method '{selector}' "
+                        f"on class '{class_name}' resolves to forwarding stub ({symbol_name})"
+                    )
+
+                # Check if method is inherited from a superclass
+                # Symbol format: +[ClassName selector] or -[ClassName selector]
+                inherited_from = _extract_inherited_class(
+                    symbol_name, class_name, selector, is_instance_method
+                )
+
+    if verbose:
+        if inherited_from:
+            prefix = '-' if is_instance_method else '+'
+            print(f"  IMP: {imp_result.GetValue()} \033[90m(inherited from {prefix}[{inherited_from} {selector}])\033[0m")
+        else:
+            print(f"  IMP: {imp_result.GetValue()}")
+
     return imp_addr, class_ptr, sel_ptr, None
+
+
+def _extract_inherited_class(
+    symbol_name: str,
+    requested_class: str,
+    selector: str,
+    is_instance_method: bool
+) -> Optional[str]:
+    """
+    Check if a symbol indicates the method is inherited from a superclass.
+
+    Args:
+        symbol_name: The symbol name at the IMP address (e.g., "+[NSObject hash]")
+        requested_class: The class name we requested the method for
+        selector: The selector we looked up
+        is_instance_method: True for instance methods, False for class methods
+
+    Returns:
+        The superclass name if inherited, None if it's the requested class's own method
+    """
+    import re
+
+    # Match Objective-C method symbol: +[ClassName selector] or -[ClassName selector]
+    # The selector part can contain colons and arguments
+    prefix = '-' if is_instance_method else '+'
+    pattern = rf'^[+-]\[(\w+)\s+(.+)\]$'
+    match = re.match(pattern, symbol_name)
+
+    if match:
+        symbol_class = match.group(1)
+        symbol_selector = match.group(2)
+
+        # Check if it's from a different class (i.e., inherited)
+        if symbol_class != requested_class:
+            # Verify the selector matches (it should, but let's be safe)
+            if symbol_selector == selector:
+                return symbol_class
+
+    return None
 
 
 def format_method_name(class_name: str, selector: str, is_instance_method: bool) -> str:
@@ -184,6 +264,68 @@ def format_method_name(class_name: str, selector: str, is_instance_method: bool)
     """
     prefix = '-' if is_instance_method else '+'
     return f"{prefix}[{class_name} {selector}]"
+
+
+def detect_method_type(
+    frame: lldb.SBFrame,
+    class_name: str,
+    selector: str,
+    verbose: bool = False
+) -> bool:
+    """
+    Auto-detect whether a method is a class method (+) or instance method (-).
+
+    Args:
+        frame: The LLDB SBFrame to use for expression evaluation
+        class_name: Name of the Objective-C class
+        selector: The selector string
+        verbose: If True, print detection details
+
+    Returns:
+        True for instance method, False for class method.
+
+    Logic:
+    - Check if the class has this method as a class method first
+    - If not found as class method, check instance method
+    - Default to instance method if we can't determine
+    """
+    # Check for class method first using class_getClassMethod
+    # This is more reliable than class_respondsToSelector for our purposes
+    check_expr = f'''(void *)({{
+        Class cls = (Class)NSClassFromString(@"{class_name}");
+        if (!cls) (void *)0;
+        SEL sel = (SEL)NSSelectorFromString(@"{selector}");
+        (void *)class_getClassMethod(cls, sel);
+    }})'''
+
+    class_result = frame.EvaluateExpression(check_expr)
+    if class_result.IsValid() and not class_result.GetError().Fail():
+        has_class_method = class_result.GetValueAsUnsigned() != 0
+        if has_class_method:
+            if verbose:
+                print(f"Auto-detect: Class method +[{class_name} {selector}]")
+            return False  # is_instance_method = False
+
+    # Check for instance method using class_getInstanceMethod
+    check_expr = f'''(void *)({{
+        Class cls = (Class)NSClassFromString(@"{class_name}");
+        if (!cls) (void *)0;
+        SEL sel = (SEL)NSSelectorFromString(@"{selector}");
+        (void *)class_getInstanceMethod(cls, sel);
+    }})'''
+
+    instance_result = frame.EvaluateExpression(check_expr)
+    if instance_result.IsValid() and not instance_result.GetError().Fail():
+        has_instance_method = instance_result.GetValueAsUnsigned() != 0
+        if has_instance_method:
+            if verbose:
+                print(f"Auto-detect: Instance method -[{class_name} {selector}]")
+            return True  # is_instance_method = True
+
+    # Default to instance method if we can't determine
+    if verbose:
+        print(f"Auto-detect: Defaulting to instance method -[{class_name} {selector}]")
+    return True
 
 
 def get_arch_registers(frame: lldb.SBFrame) -> Tuple[str, str, List[str]]:

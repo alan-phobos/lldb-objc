@@ -32,10 +32,7 @@ if not os.path.exists(objc_breakpoint_path):
     print(f"Error: objc_breakpoint.py not found at: {objc_breakpoint_path}")
     sys.exit(1)
 
-print(f"Launching LLDB with HelloWorld binary...")
-print(f"Binary path: {hello_world_path}")
-print(f"Script path: {objc_breakpoint_path}")
-print()
+print(f"Launching LLDB with {hello_world_path}")
 
 # Create LLDB command sequence
 lldb_commands = f"""
@@ -43,26 +40,19 @@ lldb_commands = f"""
 file {hello_world_path}
 
 # Set breakpoint on main
-b main
+b HelloWorld\`main
 
 # Run the process
 run
 
+# Delete the main breakpoint now that we've hit it
+breakpoint delete 1
+
 # Load IDS.framework (this will load the Objective-C runtime and IDS private classes)
 expr (void)dlopen("/System/Library/PrivateFrameworks/IDS.framework/IDS", 0x2)
 
-# Display help
-# Note: All objc_*.py commands are auto-loaded from ~/.lldbinit
-script print("\\n=== Ready for testing! ===\\n")
-script print("Available commands:\\n")
-script print("  obrk -[ClassName selector:]  - Set breakpoint on instance method")
-script print("  obrk +[ClassName selector:]  - Set breakpoint on class method")
-script print("  osel ClassName [pattern]     - Find selectors in a class")
-script print("  ocls [pattern]               - Find classes (supports wildcards)\\n")
-script print("Examples:")
-script print("  obrk -[IDSService init]")
-script print("  osel IDSService")
-script print("  ocls IDS*\\n")
+# Ready message
+script print("\\n=== Ready! Commands: obrk, osel, ocls, ocall, owatch, oprotos ===")
 """
 
 # Write commands to a temporary file

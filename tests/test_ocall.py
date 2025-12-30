@@ -163,6 +163,103 @@ def validate_return_value():
     return validator
 
 
+def validate_address_prefix():
+    """Validator for address prefix in output with variable name."""
+    def validator(output):
+        # Look for the call-style format: (Type *) $N = 0x...
+        # Pattern: ($N) followed by = and hex address
+        var_match = re.search(r'\$\d+\s*=\s*(0x[0-9a-fA-F]+)', output, re.MULTILINE)
+        if not var_match:
+            return False, (f"No variable assignment with address found\n"
+                          f"    Expected: Output like '(Type) $N = 0x...' format\n"
+                          f"    Actual: No matching pattern found\n"
+                          f"    Output preview: {output[:300]}")
+        return True, f"Found variable with address: {var_match.group(1)}"
+    return validator
+
+
+def validate_address_matches_po():
+    """Validator that extracts address from ocall output and verifies it matches po output."""
+    def validator(output):
+        # The output contains both the ocall result and the po result
+        # Look for the call-style format: (Type *) $N = 0x...
+        var_match = re.search(r'\$\d+\s*=\s*(0x[0-9a-fA-F]+)', output, re.MULTILINE)
+        if not var_match:
+            return False, (f"No variable assignment with address found\n"
+                          f"    Expected: Output like '(Type) $N = 0x...' format\n"
+                          f"    Actual: No matching pattern found\n"
+                          f"    Output preview: {output[:300]}")
+
+        address = var_match.group(1)
+
+        # Look for a date pattern in the output - it should appear in both ocall and po results
+        # The date format from NSDate is like: 2025-12-29 21:46:51 +0000
+        date_pattern = r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'
+        date_matches = re.findall(date_pattern, output)
+
+        if len(date_matches) < 2:
+            return False, (f"Expected two date representations (ocall and po)\n"
+                          f"    Found: {len(date_matches)} date(s)\n"
+                          f"    Address: {address}\n"
+                          f"    Output preview: {output[:400]}")
+
+        # Both dates should match (they're the same object)
+        if date_matches[0] == date_matches[1]:
+            return True, f"Address {address} verified: both show '{date_matches[0]}'"
+
+        return False, (f"Date mismatch between ocall and po\n"
+                      f"    ocall date: {date_matches[0]}\n"
+                      f"    po date: {date_matches[1]}\n"
+                      f"    Address: {address}")
+    return validator
+
+
+def validate_auto_detect_class_method():
+    """Validator for auto-detect class method (without + prefix)."""
+    def validator(output):
+        # Should return a date just like +[NSDate date]
+        if re.search(r'\d{4}-\d{2}-\d{2}|\d{2}:\d{2}:\d{2}|NSDate', output):
+            return True, "Auto-detected class method returned date"
+        elif 'error' in output.lower() or 'failed' in output.lower():
+            return False, (f"Auto-detect failed\n"
+                          f"    Expected: Date representation\n"
+                          f"    Actual: Error or failure\n"
+                          f"    Output preview: {output[:200]}")
+        return False, (f"Unexpected output\n"
+                      f"    Expected: Date format from [NSDate date]\n"
+                      f"    Output preview: {output[:200]}")
+    return validator
+
+
+def validate_auto_detect_instance_method():
+    """Validator for auto-detect instance method on variable."""
+    def validator(output):
+        if 'AutoDetectTest' in output:
+            return True, "Auto-detected instance method returned description"
+        elif 'error' in output.lower():
+            return False, (f"Auto-detect instance method failed\n"
+                          f"    Expected: 'AutoDetectTest' in output\n"
+                          f"    Actual: Error encountered\n"
+                          f"    Output preview: {output[:200]}")
+        return False, (f"Instance description not found\n"
+                      f"    Expected: 'AutoDetectTest' from description\n"
+                      f"    Output preview: {output[:200]}")
+    return validator
+
+
+def validate_variable_name_in_output():
+    """Validator that output includes variable name like $N."""
+    def validator(output):
+        # Look for pattern like ($N) = in the output
+        if re.search(r'\$\d+\s*=', output):
+            return True, "Variable name found in output"
+        return False, (f"Variable name not found\n"
+                      f"    Expected: '$N =' pattern in output\n"
+                      f"    Actual: No variable name pattern found\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
 # =============================================================================
 # Test Specifications
 # =============================================================================
@@ -224,6 +321,41 @@ def get_test_specs():
             ['ocall +[NSNumber numberWithInt:42]'],
             validate_return_value()
         ),
+        # Address prefix in output
+        (
+            "Address prefix: output starts with hex address",
+            ['ocall +[NSDate date]'],
+            validate_address_prefix()
+        ),
+        (
+            "Address prefix: po on address matches ocall description",
+            [
+                'expr NSDate *$testDate = [NSDate date]',
+                'ocall -[$testDate description]',
+                'po $testDate'
+            ],
+            validate_address_matches_po()
+        ),
+        # Auto-detect method type
+        (
+            "Auto-detect: class method [NSDate date]",
+            ['ocall [NSDate date]'],
+            validate_auto_detect_class_method()
+        ),
+        (
+            "Auto-detect: instance method on $variable",
+            [
+                'expr NSString *$autoStr = @"AutoDetectTest"',
+                'ocall [$autoStr description]'
+            ],
+            validate_auto_detect_instance_method()
+        ),
+        # Variable name in output
+        (
+            "Output format: includes variable name $N",
+            ['ocall +[NSDate date]'],
+            validate_variable_name_in_output()
+        ),
     ]
 
 
@@ -243,6 +375,9 @@ def main():
         "Private classes": (5, 6),
         "Error handling": (6, 8),
         "Return values": (8, 9),
+        "Address prefix": (9, 11),
+        "Auto-detect": (11, 13),
+        "Output format": (13, 14),
     }
 
     passed, total = run_shared_test_suite(

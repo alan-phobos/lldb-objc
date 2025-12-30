@@ -3,6 +3,7 @@
 LLDB script for setting breakpoints on Objective-C methods, including private symbols.
 Usage: obrk -[ClassName selector:with:args:]
        obrk +[ClassName classMethod:]
+       obrk [ClassName selector:]  (auto-detects + or -)
 """
 
 from __future__ import annotations
@@ -25,7 +26,8 @@ except ImportError:
 from objc_utils import (
     parse_method_signature,
     resolve_method_address,
-    format_method_name
+    format_method_name,
+    detect_method_type
 )
 
 
@@ -46,18 +48,22 @@ def breakpoint_on_objc_method(
         result.SetError("Process must be running and stopped")
         return
 
-    # Parse the method signature
-    is_instance_method, class_name, selector, error = parse_method_signature(command)
-    if error:
-        result.SetError(f"Usage: obrk -[ClassName selector:] or obrk +[ClassName selector:]\n{error}")
-        return
-
-    method_name = format_method_name(class_name, selector, is_instance_method)
-    print(f"Resolving {'instance' if is_instance_method else 'class'} method: {method_name}")
-
     # Get the current frame to evaluate expressions
     thread = process.GetSelectedThread()
     frame = thread.GetSelectedFrame()
+
+    # Parse the method signature
+    is_instance_method, class_name, selector, error = parse_method_signature(command)
+    if error:
+        result.SetError(f"Usage: obrk -[ClassName selector:], obrk +[ClassName selector:], or obrk [ClassName selector:]\n{error}")
+        return
+
+    # Auto-detect method type if not specified
+    if is_instance_method is None:
+        is_instance_method = detect_method_type(frame, class_name, selector, verbose=True)
+
+    method_name = format_method_name(class_name, selector, is_instance_method)
+    print(f"Resolving {'instance' if is_instance_method else 'class'} method: {method_name}")
 
     # Resolve the method address
     imp_addr, class_ptr, sel_ptr, error = resolve_method_address(
@@ -87,9 +93,10 @@ def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any])
     """Initialize the module by registering the command."""
     debugger.HandleCommand(
         'command script add -h "Set breakpoint on Objective-C method. '
-        'Usage: obrk -[ClassName selector:] or obrk +[ClassName classMethod:]" '
+        'Usage: obrk -[ClassName selector:] or obrk +[ClassName classMethod:] or obrk [ClassName selector:] (auto-detect)" '
         '-f objc_breakpoint.breakpoint_on_objc_method obrk'
     )
     print(f"[lldb-objc v{__version__}] Objective-C breakpoint command 'obrk' has been installed.")
     print("Usage: obrk -[ClassName selector:]")
     print("       obrk +[ClassName classMethod:]")
+    print("       obrk [ClassName selector:]  (auto-detects + or -)")
