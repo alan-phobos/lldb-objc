@@ -261,6 +261,145 @@ def validate_variable_name_in_output():
 
 
 # =============================================================================
+# Expression Evaluation Validators
+# =============================================================================
+
+def validate_string_literal():
+    """Validator for Objective-C string literal evaluation."""
+    def validator(output):
+        # Should return NSTaggedPointerString or NSString with the literal value
+        if 'Test' in output and ('NSTaggedPointerString' in output or 'NSString' in output or '__NSCFConstantString' in output):
+            return True, "String literal evaluated correctly"
+        elif 'Test' in output and '0x' in output:
+            # Got the string value with an address - good enough
+            return True, "String literal returned with address"
+        elif 'error' in output.lower() or 'failed' in output.lower():
+            return False, (f"Expression evaluation failed\n"
+                          f"    Expected: 'Test' string with NSString type\n"
+                          f"    Actual: Error encountered\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"String literal not properly evaluated\n"
+                      f"    Expected: 'Test' and NSString/NSTaggedPointerString in output\n"
+                      f"    Actual: Not found\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_number_literal():
+    """Validator for NSNumber literal evaluation."""
+    def validator(output):
+        # Should return NSNumber with the value 42
+        if '42' in output and ('NSNumber' in output or '__NSCFNumber' in output or '0x' in output):
+            return True, "Number literal evaluated correctly"
+        elif 'error' in output.lower() or 'failed' in output.lower():
+            return False, (f"Number literal evaluation failed\n"
+                          f"    Expected: NSNumber with value 42\n"
+                          f"    Actual: Error encountered\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Number literal not properly evaluated\n"
+                      f"    Expected: '42' in output\n"
+                      f"    Actual: Not found\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_array_literal():
+    """Validator for NSArray literal evaluation."""
+    def validator(output):
+        # Should return an NSArray with elements
+        if ('NSArray' in output or '__NSArrayI' in output or '__NSArray' in output) and '0x' in output:
+            return True, "Array literal evaluated correctly"
+        elif 'one' in output.lower() and 'two' in output.lower():
+            # Array contents visible
+            return True, "Array literal with contents visible"
+        elif 'error' in output.lower() or 'failed' in output.lower():
+            return False, (f"Array literal evaluation failed\n"
+                          f"    Expected: NSArray in output\n"
+                          f"    Actual: Error encountered\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Array literal not properly evaluated\n"
+                      f"    Expected: NSArray type or array contents in output\n"
+                      f"    Actual: Not found\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_dictionary_literal():
+    """Validator for NSDictionary literal evaluation."""
+    def validator(output):
+        # Should return an NSDictionary
+        if ('NSDictionary' in output or '__NSDictionary' in output) and '0x' in output:
+            return True, "Dictionary literal evaluated correctly"
+        elif 'key' in output.lower() and 'value' in output.lower():
+            # Dictionary contents visible
+            return True, "Dictionary literal with contents visible"
+        elif 'error' in output.lower() or 'failed' in output.lower():
+            return False, (f"Dictionary literal evaluation failed\n"
+                          f"    Expected: NSDictionary in output\n"
+                          f"    Actual: Error encountered\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Dictionary literal not properly evaluated\n"
+                      f"    Expected: NSDictionary type or dictionary contents in output\n"
+                      f"    Actual: Not found\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_boxed_expression():
+    """Validator for boxed expression evaluation like @(1+1)."""
+    def validator(output):
+        # Should return NSNumber with value 2
+        if '2' in output and ('NSNumber' in output or '__NSCFNumber' in output or '0x' in output):
+            return True, "Boxed expression evaluated correctly"
+        elif 'error' in output.lower() or 'failed' in output.lower():
+            return False, (f"Boxed expression evaluation failed\n"
+                          f"    Expected: NSNumber with value 2\n"
+                          f"    Actual: Error encountered\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Boxed expression not properly evaluated\n"
+                      f"    Expected: '2' in output\n"
+                      f"    Actual: Not found\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_nested_expression():
+    """Validator for nested message send expression."""
+    def validator(output):
+        # [[NSDate date] description] should return a date string
+        if re.search(r'\d{4}-\d{2}-\d{2}|\d{2}:\d{2}:\d{2}', output):
+            return True, "Nested expression evaluated correctly"
+        elif 'error' in output.lower() or 'failed' in output.lower():
+            return False, (f"Nested expression evaluation failed\n"
+                          f"    Expected: Date string in output\n"
+                          f"    Actual: Error encountered\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Nested expression not properly evaluated\n"
+                      f"    Expected: Date string in output\n"
+                      f"    Actual: Not found\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_c_function_call():
+    """Validator for C function call within expression."""
+    def validator(output):
+        # NSHomeDirectory() should return a path string
+        if '/Users/' in output or '/var/' in output or '/home/' in output:
+            return True, "C function call evaluated correctly"
+        elif 'error' in output.lower() or 'failed' in output.lower():
+            return False, (f"C function call evaluation failed\n"
+                          f"    Expected: Home directory path\n"
+                          f"    Actual: Error encountered\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"C function call not properly evaluated\n"
+                      f"    Expected: Path string in output\n"
+                      f"    Actual: Not found\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+# =============================================================================
 # Test Specifications
 # =============================================================================
 
@@ -356,6 +495,42 @@ def get_test_specs():
             ['ocall +[NSDate date]'],
             validate_variable_name_in_output()
         ),
+        # Expression evaluation (arbitrary Objective-C expressions)
+        (
+            "Expression: string literal @\"Test\"",
+            ['ocall @"Test"'],
+            validate_string_literal()
+        ),
+        (
+            "Expression: NSNumber literal @42",
+            ['ocall @42'],
+            validate_number_literal()
+        ),
+        (
+            "Expression: NSArray literal @[@\"one\", @\"two\"]",
+            ['ocall @[@"one", @"two"]'],
+            validate_array_literal()
+        ),
+        (
+            "Expression: NSDictionary literal @{@\"key\": @\"value\"}",
+            ['ocall @{@"key": @"value"}'],
+            validate_dictionary_literal()
+        ),
+        (
+            "Expression: boxed expression @(1+1)",
+            ['ocall @(1+1)'],
+            validate_boxed_expression()
+        ),
+        (
+            "Expression: nested message send [[NSDate date] description]",
+            ['ocall [[NSDate date] description]'],
+            validate_nested_expression()
+        ),
+        (
+            "Expression: C function call NSHomeDirectory()",
+            ['ocall NSHomeDirectory()'],
+            validate_c_function_call()
+        ),
     ]
 
 
@@ -378,6 +553,7 @@ def main():
         "Address prefix": (9, 11),
         "Auto-detect": (11, 13),
         "Output format": (13, 14),
+        "Expression evaluation": (14, 21),
     }
 
     passed, total = run_shared_test_suite(

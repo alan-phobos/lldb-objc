@@ -7,6 +7,10 @@ Usage: ocall +[ClassName selector:]           # Class method
        ocall -[$register selector:]           # Instance method on register (e.g., $x0)
        ocall -[0x123456 selector:]            # Instance method on address
        ocall [ClassName selector:]            # Auto-detect method type (+ or -)
+       ocall @"string"                        # Evaluate Objective-C expression (string literal)
+       ocall @42                              # Evaluate expression (NSNumber literal)
+       ocall @[@"a", @"b"]                    # Evaluate expression (NSArray literal)
+       ocall NSHomeDirectory()                # Evaluate expression (C function call)
        ocall --verbose +[ClassName selector:] # Shows resolution chain
 """
 
@@ -59,6 +63,44 @@ def detect_method_type(
     return not is_instance
 
 
+def evaluate_expression(
+    frame: lldb.SBFrame,
+    expression: str,
+    result: lldb.SBCommandReturnObject,
+    verbose: bool = False
+) -> None:
+    """
+    Evaluate an arbitrary Objective-C expression and display the result.
+
+    Supports:
+    - String literals: @"hello"
+    - Number literals: @42, @3.14
+    - Array literals: @[@"a", @"b"]
+    - Dictionary literals: @{@"key": @"value"}
+    - Boxed expressions: @(1+1)
+    - Nested message sends: [[NSDate date] description]
+    - C function calls: NSHomeDirectory()
+    """
+    if verbose:
+        print(f"Evaluating expression: {expression}")
+        print()
+
+    # Cast to (id) to ensure proper handling of Objective-C objects
+    # This allows the expression evaluator to treat the result as an object
+    expr_to_eval = f"(id)({expression})"
+
+    expr_result = frame.EvaluateExpression(expr_to_eval)
+
+    if not expr_result.IsValid() or expr_result.GetError().Fail():
+        error_msg = str(expr_result.GetError()) if expr_result.GetError().Fail() else "Unknown error"
+        result.SetError(f"Expression evaluation failed: {error_msg}")
+        return
+
+    # Display the result
+    display_result(expr_result)
+    result.SetStatus(lldb.eReturnStatusSuccessFinishResult)
+
+
 def call_objc_method(
     debugger: lldb.SBDebugger,
     command: str,
@@ -76,6 +118,10 @@ def call_objc_method(
         result.SetError("Process must be running and stopped")
         return
 
+    # Get the current frame for expression evaluation
+    thread = process.GetSelectedThread()
+    frame = thread.GetSelectedFrame()
+
     # Parse command for verbose flag
     command = command.strip()
     verbose = False
@@ -85,11 +131,21 @@ def call_objc_method(
         command = command.split(None, 1)[1] if ' ' in command else ''
         command = command.strip()
 
-    # Validate basic syntax - support +[, -[, or just [ for auto-detect
-    if not (command.startswith('-[') or command.startswith('+[') or command.startswith('[')):
-        result.SetError("Usage: ocall -[receiver selector:] or ocall +[ClassName selector:]\n"
-                       "       ocall [ClassName selector:]  (auto-detects + or -)\n"
-                       "       ocall --verbose +[ClassName selector:]")
+    # Check if this is a method call syntax or an arbitrary expression
+    # Method call: -[...], +[...], or [ClassName selector] (auto-detect)
+    # For auto-detect, check that first word after [ is a valid identifier (not another [)
+    is_method_call = command.startswith('-[') or command.startswith('+[')
+
+    if command.startswith('[') and not command.startswith('[['):
+        # Could be auto-detect method call [ClassName selector]
+        # Check if it looks like a method call (first word after [ is identifier)
+        inner = command[1:].lstrip()
+        if inner and (inner[0].isalpha() or inner[0] == '_' or inner[0] == '$'):
+            is_method_call = True
+
+    # If not method call syntax, treat as arbitrary Objective-C expression
+    if not is_method_call:
+        evaluate_expression(frame, command, result, verbose)
         return
 
     # Determine if we need to auto-detect method type
@@ -127,10 +183,6 @@ def call_objc_method(
 
     receiver = parts[0]
     selector_with_args = parts[1]
-
-    # Get the current frame to evaluate expressions
-    thread = process.GetSelectedThread()
-    frame = thread.GetSelectedFrame()
 
     # Auto-detect method type if not specified
     if auto_detect:
@@ -389,12 +441,13 @@ def display_result(sbvalue: lldb.SBValue) -> None:
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the module by registering the command."""
     debugger.HandleCommand(
-        'command script add -h "Call Objective-C methods. '
-        'Usage: ocall +[ClassName selector:] or ocall -[$variable selector:] or ocall [ClassName selector:] [--verbose]" '
+        'command script add -h "Call Objective-C methods or evaluate expressions. '
+        'Usage: ocall +[ClassName selector:] or ocall -[$variable selector:] or ocall @\\\"string\\\" [--verbose]" '
         '-f objc_call.call_objc_method ocall'
     )
     print(f"[lldb-objc v{__version__}] Objective-C method caller command 'ocall' has been installed.")
     print("Usage: ocall +[ClassName selector:]")
     print("       ocall -[$variable selector:]")
     print("       ocall [ClassName selector:]  (auto-detects + or -)")
+    print('       ocall @"string"              (evaluate expression)')
     print("       ocall --verbose +[ClassName selector:]")
