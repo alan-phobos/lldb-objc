@@ -250,6 +250,27 @@ def _extract_inherited_class(
     return None
 
 
+def extract_category_from_symbol(symbol_name: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Extract class name, category name, and selector from an Objective-C symbol.
+
+    Args:
+        symbol_name: Symbol like "-[NSString(CategoryName) methodName]" or "-[NSString methodName]"
+
+    Returns:
+        Tuple of (class_name, category_name, selector)
+        category_name is None if the method is not from a category
+    """
+    import re
+    # Match: +/-[ClassName(CategoryName) selector] or +/-[ClassName selector]
+    pattern = r'^[+-]\[(\w+)(?:\((\w+)\))?\s+(.+)\]$'
+    match = re.match(pattern, symbol_name)
+
+    if match:
+        return match.group(1), match.group(2), match.group(3)
+    return None, None, None
+
+
 def format_method_name(class_name: str, selector: str, is_instance_method: bool) -> str:
     """
     Format a method name in Objective-C syntax.

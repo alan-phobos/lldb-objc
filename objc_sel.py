@@ -16,6 +16,7 @@ Options:
     --verbose      Show detailed timing breakdown and resource usage
     --instance     Show only instance methods (-)
     --class        Show only class methods (+)
+    --categories   Show which category each method comes from (if any)
 
 Pattern matching:
   - Simple text: substring match (case-insensitive)
@@ -59,7 +60,8 @@ CacheEntry = Dict[str, Any]
 DEFAULT_BATCH_SIZE = 50
 
 # Global cache for selector lists
-# Structure: {process_id: {class_name: {'instance': [(sel_name, imp_addr), ...], 'class': [...], 'timestamp': time}}}
+# Structure: {process_id: {class_name: {'instance': [(sel_name, imp_addr, category), ...], 'class': [...], 'timestamp': time, 'has_categories': bool}}}
+# When has_categories is False, category element in tuples is None
 _selector_cache: Dict[int, Dict[str, CacheEntry]] = {}
 
 
@@ -94,6 +96,7 @@ def find_objc_selectors(
     verbose = '--verbose' in args
     instance_only = '--instance' in args
     class_only = '--class' in args
+    show_categories = '--categories' in args
 
     # Remove flags from args
     non_flag_args = [arg for arg in args if not arg.startswith('--')]
@@ -109,7 +112,7 @@ def find_objc_selectors(
                 print("No selector cache found for current process")
             result.SetStatus(lldb.eReturnStatusSuccessFinishResult)
             return
-        result.SetError("Usage: osel ClassName [--reload] [--clear-cache] [--verbose] [--instance] [--class] [pattern]")
+        result.SetError("Usage: osel ClassName [--reload] [--clear-cache] [--verbose] [--instance] [--class] [--categories] [pattern]")
         return
 
     class_name = non_flag_args[0]
@@ -149,16 +152,23 @@ def find_objc_selectors(
     setup_start = time.time()
 
     # Check cache first
+    # If --categories is requested but cache doesn't have category info, we need to refetch
     from_cache = False
-    if not force_reload and pid in _selector_cache and class_name in _selector_cache[pid]:
+    cache_usable = (
+        not force_reload
+        and pid in _selector_cache
+        and class_name in _selector_cache[pid]
+        and (not show_categories or _selector_cache[pid][class_name].get('has_categories', False))
+    )
+    if cache_usable:
         cache_entry = _selector_cache[pid][class_name]
         all_instance_methods = cache_entry['instance']
         all_class_methods = cache_entry['class']
 
-        # Filter by pattern (now methods are tuples of (sel_name, imp_addr))
+        # Filter by pattern (methods are tuples of (sel_name, imp_addr, category))
         if pattern:
-            instance_methods = [(name, addr) for name, addr in all_instance_methods if matches_pattern(name, pattern)]
-            class_methods = [(name, addr) for name, addr in all_class_methods if matches_pattern(name, pattern)]
+            instance_methods = [m for m in all_instance_methods if matches_pattern(m[0], pattern)]
+            class_methods = [m for m in all_class_methods if matches_pattern(m[0], pattern)]
         else:
             instance_methods = all_instance_methods
             class_methods = all_class_methods
@@ -188,7 +198,9 @@ def find_objc_selectors(
         # Find instance methods (unless --class flag is set)
         instance_start = time.time()
         if not class_only:
-            all_instance_methods, inst_timing = get_methods_optimized(frame, process, class_ptr, is_instance=True)
+            all_instance_methods, inst_timing = get_methods_optimized(
+                frame, process, class_ptr, is_instance=True, resolve_categories=show_categories
+            )
             timing['expression_count'] += inst_timing['expression_count']
             timing['memory_read_count'] += inst_timing['memory_read_count']
         else:
@@ -205,7 +217,9 @@ def find_objc_selectors(
 
             if metaclass_result.IsValid() and not metaclass_result.GetError().Fail():
                 metaclass_ptr = metaclass_result.GetValueAsUnsigned()
-                all_class_methods, cls_timing = get_methods_optimized(frame, process, metaclass_ptr, is_instance=False)
+                all_class_methods, cls_timing = get_methods_optimized(
+                    frame, process, metaclass_ptr, is_instance=False, resolve_categories=show_categories
+                )
                 timing['expression_count'] += cls_timing['expression_count']
                 timing['memory_read_count'] += cls_timing['memory_read_count']
             else:
@@ -222,13 +236,14 @@ def find_objc_selectors(
         _selector_cache[pid][class_name] = {
             'instance': all_instance_methods,
             'class': all_class_methods,
-            'timestamp': time.time()
+            'timestamp': time.time(),
+            'has_categories': show_categories
         }
 
-        # Apply pattern filter (methods are now tuples of (sel_name, imp_addr))
+        # Apply pattern filter (methods are tuples of (sel_name, imp_addr, category))
         if pattern:
-            instance_methods = [(name, addr) for name, addr in all_instance_methods if matches_pattern(name, pattern)]
-            class_methods = [(name, addr) for name, addr in all_class_methods if matches_pattern(name, pattern)]
+            instance_methods = [m for m in all_instance_methods if matches_pattern(m[0], pattern)]
+            class_methods = [m for m in all_class_methods if matches_pattern(m[0], pattern)]
         else:
             instance_methods = all_instance_methods
             class_methods = all_class_methods
@@ -240,10 +255,16 @@ def find_objc_selectors(
     if not class_only:
         if instance_methods:
             print(f"Instance methods ({len(instance_methods)}):")
-            for sel_name, imp_addr in sorted(instance_methods, key=lambda x: x[0]):
-                # Display address in dimmed gray text
+            for method in sorted(instance_methods, key=lambda x: x[0]):
+                sel_name = method[0]
+                imp_addr = method[1]
+                category = method[2] if len(method) > 2 else None
+                # Display address in dimmed gray text, with category if available
                 if imp_addr:
-                    print(f"  -{sel_name}  \033[90m0x{imp_addr:x}\033[0m")
+                    if category and show_categories:
+                        print(f"  -{sel_name}  \033[90m({category}) 0x{imp_addr:x}\033[0m")
+                    else:
+                        print(f"  -{sel_name}  \033[90m0x{imp_addr:x}\033[0m")
                 else:
                     print(f"  -{sel_name}")
         else:
@@ -255,10 +276,16 @@ def find_objc_selectors(
             if not class_only:
                 print()  # Extra newline between sections
             print(f"Class methods ({len(class_methods)}):")
-            for sel_name, imp_addr in sorted(class_methods, key=lambda x: x[0]):
-                # Display address in dimmed gray text
+            for method in sorted(class_methods, key=lambda x: x[0]):
+                sel_name = method[0]
+                imp_addr = method[1]
+                category = method[2] if len(method) > 2 else None
+                # Display address in dimmed gray text, with category if available
                 if imp_addr:
-                    print(f"  +{sel_name}  \033[90m0x{imp_addr:x}\033[0m")
+                    if category and show_categories:
+                        print(f"  +{sel_name}  \033[90m({category}) 0x{imp_addr:x}\033[0m")
+                    else:
+                        print(f"  +{sel_name}  \033[90m0x{imp_addr:x}\033[0m")
                 else:
                     print(f"  +{sel_name}")
         else:
@@ -385,16 +412,19 @@ def get_methods_optimized(
     frame: lldb.SBFrame,
     process: lldb.SBProcess,
     class_ptr: int,
-    is_instance: bool = True
-) -> Tuple[List[Tuple[str, int]], TimingDict]:
+    is_instance: bool = True,
+    resolve_categories: bool = False
+) -> Tuple[List[Tuple[str, int, Optional[str]]], TimingDict]:
     """
     Get all methods for a class using class_copyMethodList.
-    Returns a tuple of (list of (selector_name, imp_address) tuples, timing dict).
+    Returns a tuple of (list of (selector_name, imp_address, category_name) tuples, timing dict).
+    category_name is None if resolve_categories=False or if the method is not from a category.
 
     Optimized implementation using:
     - Bulk memory reads for method pointer array
     - Batched sel_getName(method_getName()) and method_getImplementation() calls
     - process.ReadCStringFromMemory() for fast string retrieval
+    - Optional symbol resolution for category detection (when resolve_categories=True)
 
     For N methods:
     - Before: ~2N expression evaluations
@@ -509,7 +539,7 @@ def get_methods_optimized(
                     if sel_name:
                         sel_name = unquote_string(sel_name)
                         imp_addr = imp_result.GetValueAsUnsigned() if imp_result.IsValid() else 0
-                        selectors.append((sel_name, imp_addr))
+                        selectors.append((sel_name, imp_addr, None))  # Category resolved later
             continue
 
         info_ptr = batch_result.GetValueAsUnsigned()
@@ -539,7 +569,7 @@ def get_methods_optimized(
                 timing['memory_read_count'] += 1
 
                 if error.Success() and sel_name:
-                    selectors.append((sel_name, imp_addr))
+                    selectors.append((sel_name, imp_addr, None))  # Category resolved later
 
         # Free the info buffer
         frame.EvaluateExpression(f'(void)free((void *)0x{info_ptr:x})')
@@ -551,6 +581,24 @@ def get_methods_optimized(
         timing['expression_count'] += 1
     frame.EvaluateExpression(f'(void)free((void *)0x{count_var_ptr:x})')
     timing['expression_count'] += 1
+
+    # Optionally resolve category info from symbols
+    if resolve_categories and selectors:
+        from objc_utils import extract_category_from_symbol
+        target = frame.GetThread().GetProcess().GetTarget()
+        methods_with_categories = []
+        for sel_name, imp_addr, _ in selectors:
+            category = None
+            if imp_addr:
+                addr = target.ResolveLoadAddress(imp_addr)
+                if addr.IsValid():
+                    symbol = addr.GetSymbol()
+                    if symbol.IsValid():
+                        symbol_name = symbol.GetName()
+                        if symbol_name:
+                            _, category, _ = extract_category_from_symbol(symbol_name)
+            methods_with_categories.append((sel_name, imp_addr, category))
+        selectors = methods_with_categories
 
     return selectors, timing
 

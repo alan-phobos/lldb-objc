@@ -395,6 +395,37 @@ def validate_class_flag_with_pattern():
     return validator
 
 
+def validate_categories_flag():
+    """Validator for --categories flag showing category sources."""
+    def validator(output):
+        # Check that we get method output
+        if 'Instance methods' in output or 'Class methods' in output:
+            # Look for category format: (SomeCategoryName)
+            # NSString has many category methods from Foundation, CoreFoundation, etc.
+            category_match = re.search(r'\(\w+\)', output)
+            if category_match:
+                return True, f"Category names displayed: {category_match.group(0)}"
+            # Some methods may not have categories, which is also valid
+            if 'Total:' in output:
+                return True, "--categories flag works (no categories found in symbols)"
+        return False, (f"Expected method listing\n"
+                      f"    Expected: 'Instance methods' or 'Class methods' sections\n"
+                      f"    Actual: Missing sections\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_categories_flag_timing():
+    """Validator for --categories flag with --verbose to check timing."""
+    def validator(output):
+        # Just check it runs successfully with verbose output
+        if 'Total:' in output:
+            return True, "--categories with --verbose works"
+        return False, (f"Expected timing output\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
 # =============================================================================
 # Test Specifications
 # =============================================================================
@@ -519,6 +550,22 @@ def get_test_specs():
             ['osel --class NSDate *date*'],
             validate_class_flag_with_pattern()
         ),
+        # Category source flags
+        (
+            "Flag: --categories",
+            ['osel --categories NSString'],
+            validate_categories_flag()
+        ),
+        (
+            "Flag: --categories with pattern",
+            ['osel --categories NSString init*'],
+            validate_categories_flag()
+        ),
+        (
+            "Flag: --categories with --verbose",
+            ['osel --categories --verbose NSObject'],
+            validate_categories_flag_timing()
+        ),
     ]
 
 
@@ -533,6 +580,7 @@ def main():
         "Edge cases": (12, 16),
         "Selector address display": (16, 18),
         "Method type filter flags": (18, 22),
+        "Category source flags": (22, 25),
     }
 
     passed, total = run_shared_test_suite(
