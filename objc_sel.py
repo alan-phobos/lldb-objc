@@ -16,7 +16,6 @@ Options:
     --verbose      Show detailed timing breakdown and resource usage
     --instance     Show only instance methods (-)
     --class        Show only class methods (+)
-    --categories   Show which category each method comes from (if any)
 
 Pattern matching:
   - Simple text: substring match (case-insensitive)
@@ -60,8 +59,8 @@ CacheEntry = Dict[str, Any]
 DEFAULT_BATCH_SIZE = 50
 
 # Global cache for selector lists
-# Structure: {process_id: {class_name: {'instance': [(sel_name, imp_addr, category), ...], 'class': [...], 'timestamp': time, 'has_categories': bool}}}
-# When has_categories is False, category element in tuples is None
+# Structure: {process_id: {class_name: {'instance': [(sel_name, imp_addr, category), ...], 'class': [...], 'timestamp': time}}}
+# category is None if method is not from a category (i.e., defined in the base class)
 _selector_cache: Dict[int, Dict[str, CacheEntry]] = {}
 
 
@@ -96,7 +95,6 @@ def find_objc_selectors(
     verbose = '--verbose' in args
     instance_only = '--instance' in args
     class_only = '--class' in args
-    show_categories = '--categories' in args
 
     # Remove flags from args
     non_flag_args = [arg for arg in args if not arg.startswith('--')]
@@ -112,7 +110,7 @@ def find_objc_selectors(
                 print("No selector cache found for current process")
             result.SetStatus(lldb.eReturnStatusSuccessFinishResult)
             return
-        result.SetError("Usage: osel ClassName [--reload] [--clear-cache] [--verbose] [--instance] [--class] [--categories] [pattern]")
+        result.SetError("Usage: osel ClassName [--reload] [--clear-cache] [--verbose] [--instance] [--class] [pattern]")
         return
 
     class_name = non_flag_args[0]
@@ -152,15 +150,8 @@ def find_objc_selectors(
     setup_start = time.time()
 
     # Check cache first
-    # If --categories is requested but cache doesn't have category info, we need to refetch
     from_cache = False
-    cache_usable = (
-        not force_reload
-        and pid in _selector_cache
-        and class_name in _selector_cache[pid]
-        and (not show_categories or _selector_cache[pid][class_name].get('has_categories', False))
-    )
-    if cache_usable:
+    if not force_reload and pid in _selector_cache and class_name in _selector_cache[pid]:
         cache_entry = _selector_cache[pid][class_name]
         all_instance_methods = cache_entry['instance']
         all_class_methods = cache_entry['class']
@@ -199,7 +190,7 @@ def find_objc_selectors(
         instance_start = time.time()
         if not class_only:
             all_instance_methods, inst_timing = get_methods_optimized(
-                frame, process, class_ptr, is_instance=True, resolve_categories=show_categories
+                frame, process, class_ptr, is_instance=True, resolve_categories=True
             )
             timing['expression_count'] += inst_timing['expression_count']
             timing['memory_read_count'] += inst_timing['memory_read_count']
@@ -218,7 +209,7 @@ def find_objc_selectors(
             if metaclass_result.IsValid() and not metaclass_result.GetError().Fail():
                 metaclass_ptr = metaclass_result.GetValueAsUnsigned()
                 all_class_methods, cls_timing = get_methods_optimized(
-                    frame, process, metaclass_ptr, is_instance=False, resolve_categories=show_categories
+                    frame, process, metaclass_ptr, is_instance=False, resolve_categories=True
                 )
                 timing['expression_count'] += cls_timing['expression_count']
                 timing['memory_read_count'] += cls_timing['memory_read_count']
@@ -236,8 +227,7 @@ def find_objc_selectors(
         _selector_cache[pid][class_name] = {
             'instance': all_instance_methods,
             'class': all_class_methods,
-            'timestamp': time.time(),
-            'has_categories': show_categories
+            'timestamp': time.time()
         }
 
         # Apply pattern filter (methods are tuples of (sel_name, imp_addr, category))
@@ -261,7 +251,7 @@ def find_objc_selectors(
                 category = method[2] if len(method) > 2 else None
                 # Display address in dimmed gray text, with category if available
                 if imp_addr:
-                    if category and show_categories:
+                    if category:
                         print(f"  -{sel_name}  \033[90m({category}) 0x{imp_addr:x}\033[0m")
                     else:
                         print(f"  -{sel_name}  \033[90m0x{imp_addr:x}\033[0m")
@@ -282,7 +272,7 @@ def find_objc_selectors(
                 category = method[2] if len(method) > 2 else None
                 # Display address in dimmed gray text, with category if available
                 if imp_addr:
-                    if category and show_categories:
+                    if category:
                         print(f"  +{sel_name}  \033[90m({category}) 0x{imp_addr:x}\033[0m")
                     else:
                         print(f"  +{sel_name}  \033[90m0x{imp_addr:x}\033[0m")
