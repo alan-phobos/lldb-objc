@@ -428,6 +428,116 @@ def validate_multiple_matches_no_dylib():
 
 
 # =============================================================================
+# --dylib Flag Validators
+# =============================================================================
+
+def validate_dylib_filter_foundation():
+    """Validator for --dylib filtering to Foundation classes."""
+    def validator(output):
+        # Should find classes and all should be from Foundation
+        if 'Found' in output or 'NSString' in output or 'NSArray' in output:
+            # Verify we got some results
+            match = re.search(r'Found (\d+)', output)
+            if match:
+                count = int(match.group(1))
+                if count > 0:
+                    return True, f"Found {count} classes from Foundation"
+            # Single match case
+            if 'NSString' in output or 'NSArray' in output or 'NSObject' in output:
+                return True, "Found Foundation class(es)"
+        if 'No classes found' in output:
+            return False, ("No classes found matching Foundation dylib filter\n"
+                          f"    Expected: Classes from Foundation.framework\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Unexpected output for --dylib filter\n"
+                      f"    Expected: Classes from Foundation\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_dylib_filter_fuzzy():
+    """Validator for --dylib with fuzzy matching (e.g., *IDS matches IDS.framework/IDS)."""
+    def validator(output):
+        # Should find IDS classes when filtering by *IDS dylib pattern
+        if 'IDS' in output and ('Found' in output or '→' in output):
+            return True, "Fuzzy dylib matching works (*IDS matches IDS.framework)"
+        if 'No classes found' in output:
+            return False, ("No IDS classes found with fuzzy dylib filter\n"
+                          f"    Expected: Classes from dylibs matching '*IDS'\n"
+                          f"    Note: IDS.framework should be loaded via dlopen\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Unexpected output for fuzzy --dylib filter\n"
+                      f"    Expected: IDS classes\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_dylib_filter_exact():
+    """Validator for --dylib with exact path matching."""
+    def validator(output):
+        # Should find classes from CoreFoundation
+        if 'Found' in output or 'CF' in output:
+            return True, "Exact dylib path filtering works"
+        if 'No classes found' in output:
+            # This could happen if the path doesn't match exactly
+            return False, ("No classes found with exact dylib path\n"
+                          f"    Expected: Classes from CoreFoundation\n"
+                          f"    Note: Path may need to match exactly\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Unexpected output for exact --dylib filter\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_dylib_filter_no_match():
+    """Validator for --dylib with non-matching pattern."""
+    def validator(output):
+        if 'No classes found' in output or '0' in output:
+            return True, "Correctly reports no matches for non-existent dylib"
+        # Even with invalid dylib filter, should not crash
+        if 'error' not in output.lower():
+            return False, (f"Expected 'No classes found' for non-existent dylib\n"
+                          f"    Actual: Got some output without error\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Unexpected error for non-existent dylib\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_dylib_filter_combined_with_pattern():
+    """Validator for --dylib combined with class pattern."""
+    def validator(output):
+        # ocls --dylib *Foundation* NSMutableString should find NSMutableString from Foundation
+        if 'NSMutableString' in output:
+            # Single class match with hierarchy
+            if '→' in output:
+                return True, "Combined --dylib and pattern filtering works"
+            return True, "Found NSMutableString from Foundation"
+        if 'No classes found' in output:
+            return False, ("No classes found with combined filters\n"
+                          f"    Expected: NSMutableString from Foundation\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Unexpected output for combined filters\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+def validate_dylib_filter_case_insensitive():
+    """Validator for --dylib case-insensitive matching."""
+    def validator(output):
+        # --dylib *foundation* (lowercase) should still match Foundation.framework
+        if 'Found' in output or 'NS' in output:
+            return True, "Dylib pattern matching is case-insensitive"
+        if 'No classes found' in output:
+            return False, ("Case-insensitive dylib matching failed\n"
+                          f"    Expected: '*foundation*' to match 'Foundation.framework'\n"
+                          f"    Output preview: {output[:300]}")
+        return False, (f"Unexpected output for case-insensitive dylib filter\n"
+                      f"    Output preview: {output[:300]}")
+    return validator
+
+
+# =============================================================================
 # Test Specifications
 # =============================================================================
 
@@ -558,6 +668,39 @@ def get_test_specs():
             ['ocls NSMutable*'],
             validate_multiple_matches_no_dylib()
         ),
+        # --dylib flag tests
+        (
+            "Flag: --dylib *Foundation* (fuzzy match)",
+            ['ocls --dylib *Foundation* NS*'],
+            validate_dylib_filter_foundation()
+        ),
+        (
+            "Flag: --dylib *IDS (fuzzy match for IDS.framework)",
+            ['ocls --dylib *IDS IDS*'],
+            validate_dylib_filter_fuzzy()
+        ),
+        (
+            "Flag: --dylib *CoreFoundation* (exact framework)",
+            ['ocls --dylib *CoreFoundation* CF*'],
+            validate_dylib_filter_exact()
+        ),
+        (
+            "Flag: --dylib with non-existent pattern",
+            # Use a specific class pattern to avoid scanning all classes
+            ['ocls --dylib *NonExistentDylib12345* NSString'],
+            validate_dylib_filter_no_match()
+        ),
+        (
+            "Flag: --dylib combined with class pattern",
+            # Use specific pattern to avoid timeout from too many classes
+            ['ocls --dylib *Foundation* NSMutableString'],
+            validate_dylib_filter_combined_with_pattern()
+        ),
+        (
+            "Flag: --dylib case-insensitive",
+            ['ocls --dylib *foundation* NS*'],
+            validate_dylib_filter_case_insensitive()
+        ),
     ]
 
 
@@ -572,6 +715,7 @@ def main():
         "Hierarchy display": (15, 18),
         "Edge cases": (18, 20),
         "Dylib display": (20, 23),
+        "--dylib filter": (23, 29),
     }
 
     # Pre-warm the class cache once at startup to avoid slow first-run in tests

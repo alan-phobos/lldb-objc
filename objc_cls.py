@@ -3,7 +3,7 @@
 LLDB script for finding Objective-C classes matching wildcard patterns.
 
 Usage:
-    ocls [--reload] [--clear-cache] [--verbose] [--ivars] [--properties] [pattern]
+    ocls [--reload] [--clear-cache] [--verbose] [--ivars] [--properties] [--dylib pattern] [pattern]
 
 Examples:
     ocls                       # List all classes (cached after first run)
@@ -19,11 +19,20 @@ Examples:
     ocls --ivars NSObject      # Show instance variables for NSObject
     ocls --properties UIView   # Show properties for UIView
     ocls --ivars --properties UIViewController  # Show both ivars and properties
+    ocls --dylib *Foundation* NS*  # NS classes from Foundation framework only
+    ocls --dylib *IDS IDS*         # IDS classes from IDS.framework (fuzzy match)
+    ocls --dylib *CoreFoundation*  # All classes from CoreFoundation
 
 Pattern matching:
   - No wildcards: exact match (case-sensitive) - uses fast-path lookup
   - With *: matches any sequence of characters (case-insensitive)
   - With ?: matches any single character (case-insensitive)
+
+Dylib filtering (--dylib):
+  - Filters results to only classes defined in dylibs matching the pattern
+  - Supports wildcards (* and ?) for fuzzy matching (case-insensitive)
+  - Matches against full dylib path (e.g., /System/Library/Frameworks/Foundation.framework/Foundation)
+  - Example: --dylib *IDS matches both "IDS.framework/IDS" and "/path/to/libIDS.dylib"
 
 Performance:
   - Fast-path (exact match): <0.01 seconds (bypasses full enumeration)
@@ -94,6 +103,7 @@ def find_objc_classes(
         --verbose: Show detailed timing breakdown and resource usage
         --ivars: Show instance variables for single class match
         --properties: Show properties for single class match
+        --dylib <pattern>: Filter to classes from dylibs matching pattern (supports wildcards)
     """
     target = debugger.GetSelectedTarget()
     process = target.GetProcess()
@@ -102,7 +112,7 @@ def find_objc_classes(
         result.SetError("Process must be running and stopped")
         return
 
-    # Parse the input: [--reload] [--clear-cache] [--batch-size=N] [--verbose] [--ivars] [--properties] [pattern]
+    # Parse the input: [--reload] [--clear-cache] [--batch-size=N] [--verbose] [--ivars] [--properties] [--dylib pattern] [pattern]
     args = command.strip().split()
     force_reload = '--reload' in args
     clear_cache = '--clear-cache' in args
@@ -110,8 +120,9 @@ def find_objc_classes(
     show_ivars = '--ivars' in args
     show_properties = '--properties' in args
 
-    # Parse batch size
+    # Parse batch size and dylib filter
     batch_size = DEFAULT_BATCH_SIZE
+    dylib_filter = None
     i = 0
     while i < len(args):
         arg = args[i]
@@ -135,6 +146,13 @@ def find_objc_classes(
                 i += 1
             except ValueError:
                 print(f"Warning: Invalid batch size format, using default {DEFAULT_BATCH_SIZE}")
+        elif arg.startswith('--dylib='):
+            # Format: --dylib=*Foundation*
+            dylib_filter = arg.split('=', 1)[1]
+        elif arg == '--dylib' and i + 1 < len(args):
+            # Format: --dylib *Foundation*
+            dylib_filter = args[i + 1]
+            i += 1
         i += 1
 
     # Remove flags and their values from args to get pattern
@@ -144,7 +162,7 @@ def find_objc_classes(
         arg = args[i]
         if arg.startswith('--'):
             # Skip flag
-            if arg in ['--batch-size'] and i + 1 < len(args):
+            if arg in ['--batch-size', '--dylib'] and i + 1 < len(args):
                 # Skip the next argument too (it's the value)
                 i += 1
         else:
@@ -175,11 +193,26 @@ def find_objc_classes(
     # Get all classes (with caching)
     class_names, timing, class_count, from_cache = get_all_classes(frame, pattern, force_reload, batch_size)
 
+    # Apply dylib filter if specified
+    if dylib_filter and class_names:
+        filtered_classes = []
+        for class_name in class_names:
+            image_path = get_class_image_path(frame, class_name)
+            if image_path and matches_dylib_pattern(image_path, dylib_filter):
+                filtered_classes.append(class_name)
+        class_names = filtered_classes
+
     # Display results with hierarchy information based on match count
     num_matches = len(class_names)
 
     if num_matches == 0:
-        print(f"No classes found{f' matching: {pattern}' if pattern else ''}")
+        filter_info = []
+        if pattern:
+            filter_info.append(f"pattern: {pattern}")
+        if dylib_filter:
+            filter_info.append(f"dylib: {dylib_filter}")
+        filter_str = f" matching {', '.join(filter_info)}" if filter_info else ""
+        print(f"No classes found{filter_str}")
     elif num_matches == 1:
         # Exactly 1 match: Show detailed hierarchy view with dylib
         class_name = class_names[0]
@@ -239,7 +272,13 @@ def find_objc_classes(
 
     elif num_matches <= 20:
         # 2-20 matches: Show compact one-liner with hierarchy for each
-        print(f"Found {num_matches} class(es){f' matching: {pattern}' if pattern else ''}:")
+        filter_info = []
+        if pattern:
+            filter_info.append(f"pattern: {pattern}")
+        if dylib_filter:
+            filter_info.append(f"dylib: {dylib_filter}")
+        filter_str = f" matching {', '.join(filter_info)}" if filter_info else ""
+        print(f"Found {num_matches} class(es){filter_str}:")
         for class_name in sorted(class_names):
             hierarchy = get_class_hierarchy(frame, class_name)
             if hierarchy and len(hierarchy) > 1:
@@ -251,14 +290,20 @@ def find_objc_classes(
                 print(f"  {class_name}")
     else:
         # More than 20 matches: Just list class names (current behavior)
-        print(f"Found {num_matches} class(es){f' matching: {pattern}' if pattern else ''}:")
+        filter_info = []
+        if pattern:
+            filter_info.append(f"pattern: {pattern}")
+        if dylib_filter:
+            filter_info.append(f"dylib: {dylib_filter}")
+        filter_str = f" matching {', '.join(filter_info)}" if filter_info else ""
+        print(f"Found {num_matches} class(es){filter_str}:")
         for class_name in sorted(class_names):
             print(f"  {class_name}")
 
     # Print timing metrics only when wildcards are involved or listing all classes
     # (no point showing metrics for exact single class match via fast-path)
     has_wildcards = pattern and ('*' in pattern or '?' in pattern)
-    show_metrics = verbose or has_wildcards or pattern is None
+    show_metrics = verbose or has_wildcards or pattern is None or dylib_filter
 
     if show_metrics:
         print()
@@ -1137,6 +1182,35 @@ def matches_pattern(class_name: str, pattern: Optional[str]) -> bool:
     else:
         # Exact matching (case-sensitive)
         return class_name == pattern
+
+
+def matches_dylib_pattern(dylib_path: str, pattern: str) -> bool:
+    """
+    Check if a dylib path matches the given pattern.
+    Always uses wildcard matching (case-insensitive).
+
+    Args:
+        dylib_path: Full path to the dylib (e.g., /System/Library/Frameworks/Foundation.framework/Foundation)
+        pattern: Pattern to match (supports * and ? wildcards)
+
+    Returns:
+        True if the path matches the pattern
+    """
+    if not dylib_path or not pattern:
+        return False
+
+    # Convert wildcard pattern to regex
+    # Escape special regex characters except * and ?
+    regex_pattern = re.escape(pattern)
+    # Replace escaped wildcards with regex equivalents
+    regex_pattern = regex_pattern.replace(r'\*', '.*')
+    regex_pattern = regex_pattern.replace(r'\?', '.')
+    # Match anywhere in the path (not just full string) for convenience
+    try:
+        return bool(re.search(regex_pattern, dylib_path, re.IGNORECASE))
+    except re.error:
+        # Fallback to substring match if regex is invalid
+        return pattern.lower() in dylib_path.lower()
 
 def build_batch_expression(class_pointers_batch: List[int]) -> str:
     """
