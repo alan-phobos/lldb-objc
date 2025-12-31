@@ -4,20 +4,22 @@ LLDB commands for Objective-C runtime introspection, including private classes/m
 
 ## Commands
 
-| Command | Purpose | Example |
-|---------|---------|---------|
+| Command | Purpose | Key Flags |
+|---------|---------|-----------|
 | `obrk` | Set breakpoints | `obrk -[Class sel:]` or `obrk +[Class method:]` |
-| `osel` | Find methods | `osel ClassName [pattern]` with `--instance`/`--class` |
-| `ocls` | Find classes | `ocls [pattern]` with `--ivars`/`--properties` |
-| `ocall` | Call methods | `ocall +[NSDate date]` or `ocall -[$var sel]` |
-| `owatch` | Auto-log breakpoints | `owatch -[Class sel]` with `--minimal`/`--stack` |
-| `oprotos` | Protocol conformance | `oprotos NSCoding` or `oprotos --list` |
+| `osel` | Find methods | `--instance`, `--class`, `--reload`, `--verbose` |
+| `ocls` | Find classes | `--ivars`, `--properties`, `--dylib`, `--batch-size=N` |
+| `ocall` | Call methods | Supports `@"string"`, `@42`, expressions |
+| `owatch` | Auto-log breakpoints | `--minimal`, `--stack` |
+| `oprotos` | Protocol conformance | `--list [pattern]` |
 
 ### Quick Examples
 ```bash
 ocls IDS*                           # Classes starting with IDS
 ocls NSString --ivars --properties  # Show class details
+ocls --dylib CoreFoundation CF*     # Classes from specific dylib
 osel IDSService send*               # Methods matching pattern
+osel NSString --instance *init*     # Instance methods only
 obrk -[IDSService sendMessage:]     # Set breakpoint
 owatch --minimal -[NSString init]   # Watch with timestamps
 oprotos --list *Delegate            # List delegate protocols
