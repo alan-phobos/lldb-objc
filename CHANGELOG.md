@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2025-12-31
+
 ### Added
 - **ocall**: Call Objective-C methods directly from LLDB
   - Supports both class and instance methods
   - Handles method arguments properly
   - Returns formatted results
+  - Expression evaluation support for complex arguments
 - **owatch**: Auto-logging breakpoints for method observation
   - `--minimal` flag for compact timestamp-only output
   - `--stack` flag to include stack traces
@@ -20,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Find classes conforming to specific protocols
   - `--list` flag to enumerate available protocols
   - Wildcard pattern matching for protocol names
+- **ocls**: `--dylib` flag to filter classes by dynamic library
+  - Batch size configuration (`--batch-size=N`)
+  - Fast-path optimization for exact matches (<0.01s)
+- **osel**: Category hinting on selector resolution
+  - Shows category name when method comes from a category
+  - Improved method resolution accuracy
 - Automatic class hierarchy display in `ocls`
   - Single match: detailed hierarchy chain
   - 2-20 matches: compact per-class hierarchy
@@ -36,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced UI conventions with consistent gray text for secondary info
 - Optimized batch size to 35 for best performance
 - Updated all documentation to reflect new command names
+- Integrated category detection more cleanly in `osel`
+- Code review and cleanup
 
 ### Performance
 - **ocls**: Fast-path optimization for exact matches (<0.01s)
@@ -66,5 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Supports both instance methods (`-`) and class methods (`+`)
 - LLDB Python scripting API
 
-[Unreleased]: https://github.com/yourusername/lldb-objc/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/yourusername/lldb-objc/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/yourusername/lldb-objc/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/yourusername/lldb-objc/releases/tag/v1.0.0
