@@ -14,6 +14,8 @@ LLDB commands for Objective-C runtime introspection, including private classes/m
 | `oprotos` | Protocol conformance | `--list [pattern]` |
 | `opool` | Find instances in pools | `--verbose` |
 | `oinstance` | Inspect object | `oinstance <addr\|$var\|expr>` |
+| `oexplain` | Explain disassembly via LLM | `--annotate`, `--claude` (uses llm by default) |
+| `oreload` | Reload all commands | No flags (for development) |
 
 ### Quick Examples
 ```bash
@@ -30,22 +32,42 @@ opool --verbose NSString            # Show pool contents while searching
 oinstance (id)[NSDate date]         # Inspect specific object
 oinstance 0x12345678                # Inspect by address
 oinstance $0                        # Inspect LLDB variable
+oexplain $pc                        # Explain current function (uses llm)
+oexplain 0x12345678                 # Explain function at address
+oexplain -a $pc                     # Annotate disassembly line-by-line
+oexplain --claude $pc               # Use Claude CLI instead of llm
 ```
 
 ## Installation
 ```bash
 ./install.py              # Install to ~/.lldbinit
 ./install.py --uninstall  # Remove
+./install.py --status     # Check installation
 ```
+
+Commands are loaded via directory import (`command script import /path/to/scripts`). Use `oreload` within LLDB to reload commands after making changes, useful for development.
 
 ## Project Structure
 ```
-objc_breakpoint.py  # obrk       objc_watch.py    # owatch
-objc_sel.py         # osel       objc_protos.py   # oprotos
-objc_cls.py         # ocls       objc_pool.py     # opool
-objc_call.py        # ocall      objc_instance.py # oinstance
-objc_utils.py       # shared     install.py       # installer
-tests/              # test suite
+scripts/            # Command modules (directory import)
+  __init__.py       # Loader with reload support
+  objc_breakpoint.py  # obrk
+  objc_sel.py         # osel
+  objc_cls.py         # ocls
+  objc_call.py        # ocall
+  objc_watch.py       # owatch
+  objc_protos.py      # oprotos
+  objc_pool.py        # opool
+  objc_instance.py    # oinstance
+  objc_explain.py     # oexplain
+  objc_utils.py       # LLDB-dependent utilities
+  objc_core.py        # Pure Python utilities (unit testable)
+  version.py          # version info
+install.py          # Installer
+package.py          # Release packager
+tests/              # Test suite
+  unit/             # Pure Python unit tests (pytest)
+  integration/      # LLDB integration tests (current tests)
 ```
 
 ## Performance Strategy
@@ -57,10 +79,19 @@ tests/              # test suite
 ## Development Guidelines
 
 ### Adding Commands
-1. Create `objc_<name>.py` with `__lldb_init_module()`
-2. Add to `install.py`
-3. Add tests in `tests/test_<name>.py`
-4. Update README.md
+1. Create `scripts/objc_<name>.py` with `__lldb_init_module()` printing one-line load message
+2. Add module name to `COMMAND_MODULES` list in `scripts/__init__.py`
+3. Add filename to `SCRIPT_FILES` list in `package.py`
+4. Add integration tests in `tests/test_<name>.py`
+5. Extract pure functions to `objc_core.py` and add unit tests in `tests/unit/`
+6. Update README.md and CLAUDE.md command tables
+7. Test with `oreload` in LLDB session to verify reload works
+
+### Code Organization for Testability
+- **objc_core.py**: Pure Python logic (parsing, formatting, pattern matching) - fully unit testable
+- **objc_utils.py**: LLDB-dependent utilities (`frame.EvaluateExpression()`, runtime introspection)
+- **Command files**: Thin entry points that orchestrate core logic and LLDB APIs
+- Import from `objc_core` for pure functions, `objc_utils` for LLDB operations
 
 ### UI Convention
 Primary info in normal text; secondary (types, hierarchy) in dim gray: `\033[90m...\033[0m`
@@ -73,16 +104,39 @@ Primary info in normal text; secondary (types, hierarchy) in dim gray: `\033[90m
 ### Common Pitfalls
 - **String handling**: Use `s[1:-1]` not `strip('"')` for LLDB `GetSummary()` strings
 - **F-strings with blocks**: Use `^{{` and `}}` for Objective-C blocks in f-strings
-- **API validation**: Before using unfamiliar API methods (especially in external libraries like LLDB), verify they exist:
-  - Check existing code for similar usage patterns
-  - Look for the method in API objects using `dir()` in similar contexts
-  - Test the API call in isolation before integrating it
-  - If uncertain, acknowledge the uncertainty and propose verification steps
-  - Example: `SBExpressionOptions.SetSuppressAllOutput()` doesn't exist—should have checked `dir(lldb.SBExpressionOptions())` or looked for similar usage in codebase
+- **ASLR/address handling**: Always use `SBAddress` for breakpoints, never raw ints. Load addresses from runtime (e.g., `class_getMethodImplementation()`) are already ASLR-adjusted. Use `target.ResolveLoadAddress(addr)` → `SBAddress`, then `BreakpointCreateBySBAddress(sbaddr)` not `BreakpointCreateByAddress(int)`. iOS has aggressive ASLR—bugs may only manifest there.
+- **API validation**: Verify LLDB methods exist via `lldb -b -o "script help(lldb.SBTarget.MethodName)"`. Check signatures with `help()`, inspect available methods with `dir()`. Test in isolation before integrating.
+- **Function signature changes**: When changing return types (e.g., `int` → `SBAddress`), grep for all callers and update them atomically in one change.
 
 ### Testing & Verification Protocol
-- **Always run tests**: After making changes, run the test suite before claiming success
+
+#### Test Layers
+1. **Unit Tests** (pytest) - Pure Python logic, no LLDB required
+   ```bash
+   pytest                    # All unit tests
+   pytest -v                 # Verbose
+   pytest -m parsing         # Only parsing tests
+   pytest --cov              # With coverage
+   ```
+   - Fast (<0.1s total)
+   - Test parsing, formatting, pattern matching
+   - Cross-platform (can run on Linux)
+
+2. **Integration Tests** - Full LLDB commands with runtime
+   ```bash
+   ./tests/run_all_tests.py          # All integration tests
+   ./tests/run_all_tests.py --quick  # Quick subset
+   ```
+   - Slower (~2-3 min for full suite)
+   - macOS-only (requires LLDB + Objective-C runtime)
+
+#### Testing Workflow
+- **Before committing**: Run `pytest` (fast) + `./tests/run_all_tests.py --quick`
+- **After refactoring**: Run full integration suite
+- **Always run tests**: After making changes, run test suite before claiming success
+- **Platform testing**: macOS and iOS differ in ASLR, framework loading, and runtime behavior. Bugs may only manifest on iOS. Consider platform-specific edge cases.
 - **Verify in actual environment**: Tests passing is necessary but not sufficient—manually verify changes work in the actual runtime environment (e.g., test LLDB commands in an actual LLDB session, not just via test framework)
+- **Bootstrap test**: After significant refactoring, run `./tests/test_bootstrap.py` (interactive, requires timeout) to verify LLDB integration works
 - **Verify output formatting**: After changes that affect user-facing output, manually inspect the formatted results to ensure:
   - No duplicate or redundant information
   - Consistent alignment and spacing
@@ -91,8 +145,6 @@ Primary info in normal text; secondary (types, hierarchy) in dim gray: `\033[90m
 - **Validate test quality**: When tests pass but something seems wrong, investigate whether tests are actually catching the error types they should
 - **Test the test framework**: Test infrastructure itself needs validation—ensure it catches exceptions, tracebacks, and error conditions properly
 - **Don't trust tests blindly**: If manual testing reveals a bug that tests missed, improve the test framework to catch that class of errors in the future
-
-Example: If implementing a feature that uses an API method, verify the method exists by testing in isolation before assuming tests validate everything.
 
 ### Root Cause Analysis
 - **Investigate unexpected outcomes**: When something unexpected happens (tests pass but code fails, errors aren't caught, etc.), don't just fix the immediate problem—investigate why it happened
@@ -103,18 +155,29 @@ Example: If implementing a feature that uses an API method, verify the method ex
   3. Improve test framework to catch this class of errors (add traceback detection to `test_helpers.py`)
 - **Ask "why" multiple times**: Don't stop at surface-level fixes; understand and address underlying causes
 
-## Tests
+## Testing
+
+See [Testing & Verification Protocol](#testing--verification-protocol) above for full details.
+
+**Quick Reference:**
 ```bash
-./tests/run_all_tests.py          # All tests
-./tests/run_all_tests.py --quick  # Quick subset
+# Unit tests (fast, no LLDB)
+pytest                           # All unit tests
+pytest -v                        # Verbose
+pytest tests/unit/test_objc_utils.py::TestParseMethodSignature  # Specific tests
+
+# Integration tests (LLDB required)
+./tests/run_all_tests.py          # All integration tests
+./tests/run_all_tests.py --quick  # Quick subset (obrk, hierarchy, ivars_props)
 ```
 
 ## Resolution Chain (obrk)
 ```
 NSClassFromString() → Class → NSSelectorFromString() → SEL
 → object_getClass() (for +methods) → class_getMethodImplementation() → IMP
-→ BreakpointCreateByAddress()
+→ ResolveLoadAddress() → SBAddress → BreakpointCreateBySBAddress()
 ```
+Note: Uses `SBAddress` instead of raw addresses to properly handle ASLR/slide on iOS and other platforms.
 
 ## Future Work
 See [docs/PLAN.md](docs/PLAN.md) for roadmap including wildcard `osel`, `oheap`, `ocat`.

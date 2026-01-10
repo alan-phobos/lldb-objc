@@ -440,14 +440,10 @@ def display_result(sbvalue: lldb.SBValue) -> None:
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the module by registering the command."""
+    module_path = f"{__name__}.call_objc_method"
     debugger.HandleCommand(
         'command script add -h "Call Objective-C methods or evaluate expressions. '
         'Usage: ocall +[ClassName selector:] or ocall -[$variable selector:] or ocall @\\\"string\\\" [--verbose]" '
-        '-f objc_call.call_objc_method ocall'
+        f'-f {module_path} ocall'
     )
-    print(f"[lldb-objc v{__version__}] Objective-C method caller command 'ocall' has been installed.")
-    print("Usage: ocall +[ClassName selector:]")
-    print("       ocall -[$variable selector:]")
-    print("       ocall [ClassName selector:]  (auto-detects + or -)")
-    print('       ocall @"string"              (evaluate expression)')
-    print("       ocall --verbose +[ClassName selector:]")
+    print(f"[lldb-objc v{__version__}] 'ocall' installed - Call Objective-C methods and evaluate expressions")

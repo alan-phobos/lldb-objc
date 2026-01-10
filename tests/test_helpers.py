@@ -101,6 +101,16 @@ def run_lldb_test(commands, scripts=None, timeout=30, load_ids_framework=True):
         cmd_args.extend(['-o', 'settings set interpreter.require-overwrite false'])
         for script in scripts:
             script_path = os.path.join(PROJECT_ROOT, script)
+
+            # Validate path exists before attempting import
+            if not os.path.exists(script_path):
+                raise FileNotFoundError(
+                    f"Script not found: {script_path}\n"
+                    f"  Looking for: {script}\n"
+                    f"  In directory: {PROJECT_ROOT}\n"
+                    f"  Hint: Scripts may have moved to 'scripts/' subdirectory"
+                )
+
             cmd_args.extend(['-o', f'command script import {script_path}'])
 
     # Setup commands
@@ -276,24 +286,38 @@ class SharedLLDBSession:
     Uses pexpect for reliable interaction with LLDB's interactive mode.
 
     Usage:
-        with SharedLLDBSession(scripts=['objc_breakpoint.py']) as session:
+        with SharedLLDBSession(scripts=['scripts/objc_breakpoint.py']) as session:
             output = session.run_command('obrk -[NSString length]')
             output = session.run_command('breakpoint list')
             session.clear_breakpoints()  # Clean state for next test
     """
 
-    def __init__(self, scripts=None, load_ids_framework=True, timeout=30):
+    # Map script filenames to their command names for validation
+    SCRIPT_TO_COMMAND = {
+        'objc_breakpoint.py': 'obrk',
+        'objc_cls.py': 'ocls',
+        'objc_sel.py': 'osel',
+        'objc_call.py': 'ocall',
+        'objc_watch.py': 'owatch',
+        'objc_protos.py': 'oprotos',
+        'objc_pool.py': 'opool',
+        'objc_instance.py': 'oinstance',
+    }
+
+    def __init__(self, scripts=None, load_ids_framework=True, timeout=30, validate_commands=True):
         """
         Initialize the shared LLDB session.
 
         Args:
-            scripts: List of script paths to import (e.g., ['objc_breakpoint.py'])
+            scripts: List of script paths to import (e.g., ['scripts/objc_breakpoint.py'])
             load_ids_framework: Whether to load IDS.framework for private class testing
             timeout: Default timeout for commands in seconds
+            validate_commands: Whether to validate that commands loaded successfully (default: True)
         """
         self.scripts = scripts or []
         self.load_ids_framework = load_ids_framework
         self.default_timeout = timeout
+        self.validate_commands = validate_commands
         self.child = None
 
     def __enter__(self):
@@ -352,6 +376,16 @@ class SharedLLDBSession:
         # Import scripts
         for script in self.scripts:
             script_path = os.path.join(PROJECT_ROOT, script)
+
+            # Validate path exists before attempting import
+            if not os.path.exists(script_path):
+                raise FileNotFoundError(
+                    f"Script not found: {script_path}\n"
+                    f"  Looking for: {script}\n"
+                    f"  In directory: {PROJECT_ROOT}\n"
+                    f"  Hint: Scripts may have moved to 'scripts/' subdirectory"
+                )
+
             init_commands.append(f'command script import {script_path}')
 
         # Set up target and run
@@ -368,9 +402,25 @@ class SharedLLDBSession:
             self.child.sendline(cmd)
             self.child.expect(r'\(lldb\)', timeout=60)
 
+            # Check if the command resulted in an error (especially for script imports)
+            output = self.child.before
+            if 'error:' in output.lower() and 'command script import' in cmd:
+                raise RuntimeError(
+                    f"Script import failed: {cmd}\n"
+                    f"Error output: {output}"
+                )
+
         # Clear the main breakpoint after it's been hit
         self.child.sendline('breakpoint delete 1')
         self.child.expect(r'\(lldb\)')
+
+        # Validate that commands loaded successfully (if requested)
+        if self.validate_commands:
+            for script in self.scripts:
+                basename = os.path.basename(script)
+                if basename in self.SCRIPT_TO_COMMAND:
+                    command_name = self.SCRIPT_TO_COMMAND[basename]
+                    self.validate_command_loaded(command_name)
 
     def run_command(self, cmd, timeout=None):
         """
@@ -409,6 +459,14 @@ class SharedLLDBSession:
         if 'Traceback (most recent call last):' in output:
             # Preserve the full traceback for debugging
             return f"ERROR: Command script failed with exception:\n{output}"
+
+        # Check for LLDB import/module errors
+        if 'module importing failed' in output:
+            return f"ERROR: Script import failed:\n{output}"
+        if 'was not found. Containing module might be missing' in output:
+            return f"ERROR: Command function not found (module import likely failed):\n{output}"
+        if 'error: ' in output.lower() and ('command script' in output.lower() or 'module' in output.lower()):
+            return f"ERROR: LLDB command error:\n{output}"
 
         # Clean up the output
         lines = output.split('\n')
@@ -458,6 +516,26 @@ class SharedLLDBSession:
     def clear_breakpoints(self):
         """Clear all breakpoints to reset state between tests."""
         return self.run_command('breakpoint delete -f')
+
+    def validate_command_loaded(self, command_name):
+        """
+        Verify that a command was successfully loaded.
+
+        Args:
+            command_name: The command to check (e.g., 'obrk', 'ocls')
+
+        Raises:
+            RuntimeError: If command is not properly loaded
+        """
+        output = self.run_command(f'help {command_name}')
+
+        if 'was not found' in output:
+            raise RuntimeError(
+                f"Command '{command_name}' not loaded properly.\n"
+                f"Help output: {output}"
+            )
+
+        return True
 
     def stop(self):
         """Stop the LLDB session."""

@@ -462,7 +462,7 @@ def main():
     passed, total = run_shared_test_suite(
         "OBRK COMMAND TEST SUITE",
         get_test_specs(),
-        scripts=['objc_breakpoint.py'],
+        scripts=['scripts/objc_breakpoint.py'],
         show_category_summary=categories
     )
     sys.exit(0 if passed == total else 1)

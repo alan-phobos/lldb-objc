@@ -23,10 +23,13 @@ try:
 except ImportError:
     __version__ = "unknown"
 
-from objc_utils import (
+from objc_core import (
     parse_method_signature,
+    format_method_name
+)
+
+from objc_utils import (
     resolve_method_address,
-    format_method_name,
     detect_method_type
 )
 
@@ -66,7 +69,7 @@ def breakpoint_on_objc_method(
     print(f"Resolving {'instance' if is_instance_method else 'class'} method: {method_name}")
 
     # Resolve the method address
-    imp_addr, class_ptr, sel_ptr, error = resolve_method_address(
+    resolved_addr, class_ptr, sel_ptr, error = resolve_method_address(
         frame, class_name, selector, is_instance_method, verbose=True
     )
 
@@ -74,11 +77,16 @@ def breakpoint_on_objc_method(
         result.SetError(error)
         return
 
-    # Set the breakpoint
-    breakpoint = target.BreakpointCreateByAddress(imp_addr)
+    if not resolved_addr.IsValid():
+        result.SetError(f"Failed to resolve method address for {method_name}")
+        return
+
+    # Set the breakpoint using the resolved SBAddress (handles ASLR correctly)
+    breakpoint = target.BreakpointCreateBySBAddress(resolved_addr)
 
     if not breakpoint.IsValid():
-        result.SetError(f"Failed to create breakpoint at 0x{imp_addr:x}")
+        load_addr = resolved_addr.GetLoadAddress(target)
+        result.SetError(f"Failed to create breakpoint at {method_name} (0x{load_addr:x})")
         return
 
     # Set a readable name for the breakpoint
@@ -91,12 +99,10 @@ def breakpoint_on_objc_method(
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the module by registering the command."""
+    module_path = f"{__name__}.breakpoint_on_objc_method"
     debugger.HandleCommand(
         'command script add -h "Set breakpoint on Objective-C method. '
         'Usage: obrk -[ClassName selector:] or obrk +[ClassName classMethod:] or obrk [ClassName selector:] (auto-detect)" '
-        '-f objc_breakpoint.breakpoint_on_objc_method obrk'
+        f'-f {module_path} obrk'
     )
-    print(f"[lldb-objc v{__version__}] Objective-C breakpoint command 'obrk' has been installed.")
-    print("Usage: obrk -[ClassName selector:]")
-    print("       obrk +[ClassName classMethod:]")
-    print("       obrk [ClassName selector:]  (auto-detects + or -)")
+    print(f"[lldb-objc v{__version__}] 'obrk' installed - Set breakpoints on Objective-C methods")

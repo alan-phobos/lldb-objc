@@ -694,7 +694,7 @@ def main():
     passed, total = run_shared_test_suite(
         "OPROTOS COMMAND TEST SUITE",
         get_test_specs(),
-        scripts=['objc_cls.py', 'objc_protos.py'],
+        scripts=['scripts/objc_cls.py', 'scripts/objc_protos.py'],
         show_category_summary=categories
     )
     sys.exit(0 if passed == total else 1)

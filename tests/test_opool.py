@@ -145,7 +145,7 @@ def main():
     passed, total = run_shared_test_suite(
         "OPOOL COMMAND TEST SUITE",
         get_test_specs(),
-        scripts=['objc_pool.py'],
+        scripts=['scripts/objc_pool.py'],
         show_category_summary=categories
     )
     sys.exit(0 if passed == total else 1)

@@ -566,7 +566,7 @@ def main():
     passed, total = run_shared_test_suite(
         "OSEL COMMAND TEST SUITE",
         get_test_specs(),
-        scripts=['objc_sel.py'],
+        scripts=['scripts/objc_sel.py'],
         show_category_summary=categories
     )
     sys.exit(0 if passed == total else 1)

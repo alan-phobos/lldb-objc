@@ -725,7 +725,7 @@ def main():
     passed, total = run_shared_test_suite(
         "OCLS COMMAND TEST SUITE",
         get_test_specs(),
-        scripts=['objc_cls.py'],
+        scripts=['scripts/objc_cls.py'],
         show_category_summary=categories,
         warmup_commands=warmup
     )

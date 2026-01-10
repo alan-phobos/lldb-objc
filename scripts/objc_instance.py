@@ -412,7 +412,8 @@ def inspect_instance_command(
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the oinstance command when this module is loaded in LLDB."""
+    module_path = f"{__name__}.inspect_instance_command"
     debugger.HandleCommand(
-        'command script add -f objc_instance.inspect_instance_command oinstance'
+        f'command script add -f {module_path} oinstance'
     )
-    print(f"[lldb-objc v{__version__}] Object inspector 'oinstance' has been installed.")
+    print(f"[lldb-objc v{__version__}] 'oinstance' installed - Inspect Objective-C object instances")

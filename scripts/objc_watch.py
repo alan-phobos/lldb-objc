@@ -397,16 +397,23 @@ def watch_objc_method(
 
     print(f"Resolving {method_name}...")
 
-    imp_addr, _, _, error = resolve_method_address(frame, class_name, selector, is_instance_method)
+    resolved_addr, _, _, error = resolve_method_address(frame, class_name, selector, is_instance_method)
     if error:
         result.SetError(error)
         return
 
-    # Create the breakpoint
-    breakpoint = target.BreakpointCreateByAddress(imp_addr)
+    if not resolved_addr.IsValid():
+        result.SetError(f"Failed to resolve method address for {method_name}")
+        return
+
+    # Get the load address for storing in watch info
+    imp_addr = resolved_addr.GetLoadAddress(target)
+
+    # Create the breakpoint using the resolved SBAddress (handles ASLR correctly)
+    breakpoint = target.BreakpointCreateBySBAddress(resolved_addr)
 
     if not breakpoint.IsValid():
-        result.SetError(f"Failed to create breakpoint at 0x{imp_addr:x}")
+        result.SetError(f"Failed to create breakpoint at {method_name} (0x{imp_addr:x})")
         return
 
     # Configure the breakpoint
@@ -508,12 +515,10 @@ def clear_watches(
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the module by registering the command."""
+    module_path = f"{__name__}.watch_objc_method"
     debugger.HandleCommand(
         'command script add -h "Watch Objective-C methods with auto-logging breakpoints. '
         'Usage: owatch -[ClassName selector:] [--detailed|--minimal|--stack|--once|--count=N|--condition=X] or owatch list|clear" '
-        '-f objc_watch.watch_objc_method owatch'
+        f'-f {module_path} owatch'
     )
-    print(f"[lldb-objc v{__version__}] Objective-C method watcher 'owatch' has been installed.")
-    print("Usage: owatch -[ClassName selector:]")
-    print("       owatch +[ClassName classMethod:]")
-    print("       owatch list | clear")
+    print(f"[lldb-objc v{__version__}] 'owatch' installed - Auto-logging breakpoints for method watching")

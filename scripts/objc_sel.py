@@ -682,10 +682,10 @@ def get_methods(
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the module by registering the command."""
+    module_path = f"{__name__}.find_objc_selectors"
     debugger.HandleCommand(
         'command script add -h "Find Objective-C selectors (methods) for a class. '
         'Usage: osel ClassName [pattern]" '
-        '-f objc_sel.find_objc_selectors osel'
+        f'-f {module_path} osel'
     )
-    print(f"[lldb-objc v{__version__}] Objective-C selector finder command 'osel' has been installed.")
-    print("Usage: osel ClassName [pattern]")
+    print(f"[lldb-objc v{__version__}] 'osel' installed - Find selectors/methods for classes")

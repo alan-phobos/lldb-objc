@@ -880,10 +880,10 @@ def find_objc_protocol_conformance(
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the module by registering the command."""
+    module_path = f"{__name__}.find_objc_protocol_conformance"
     debugger.HandleCommand(
         'command script add -h "Find Objective-C classes that conform to a protocol. '
         'Usage: oprotos <protocol> [--direct] [--reload] [--verbose] | oprotos --list [pattern]" '
-        '-f objc_protos.find_objc_protocol_conformance oprotos'
+        f'-f {module_path} oprotos'
     )
-    print(f"[lldb-objc v{__version__}] Protocol conformance finder 'oprotos' has been installed.")
-    print("Usage: oprotos <protocol> [--direct] or oprotos --list [pattern]")
+    print(f"[lldb-objc v{__version__}] 'oprotos' installed - Find classes conforming to protocols")

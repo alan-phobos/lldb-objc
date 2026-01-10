@@ -15,29 +15,43 @@ import sys
 import zipfile
 from pathlib import Path
 
-# Import version
+# Configuration
+SCRIPT_DIR = Path(__file__).parent.absolute()
+SCRIPTS_DIR = SCRIPT_DIR / "scripts"
+
+# Import version from scripts directory
+sys.path.insert(0, str(SCRIPTS_DIR))
 try:
     from version import __version__
 except ImportError:
     __version__ = "unknown"
 
-# Configuration
-SCRIPT_DIR = Path(__file__).parent.absolute()
-
-# Files to include in the release
+# Files to include in the release (relative to SCRIPT_DIR)
 RELEASE_FILES = [
-    "objc_breakpoint.py",
-    "objc_sel.py",
-    "objc_cls.py",
-    "objc_call.py",
-    "objc_watch.py",
-    "objc_protos.py",
-    "objc_utils.py",
     "install.py",
-    "version.py",
     "README.md",
     "LICENSE",
 ]
+
+# Script files in scripts/ directory
+SCRIPT_FILES = [
+    "scripts/__init__.py",
+    "scripts/objc_breakpoint.py",
+    "scripts/objc_sel.py",
+    "scripts/objc_cls.py",
+    "scripts/objc_call.py",
+    "scripts/objc_watch.py",
+    "scripts/objc_protos.py",
+    "scripts/objc_pool.py",
+    "scripts/objc_instance.py",
+    "scripts/objc_explain.py",
+    "scripts/objc_utils.py",
+    "scripts/objc_core.py",
+    "scripts/version.py",
+]
+
+# Combine all files
+ALL_RELEASE_FILES = RELEASE_FILES + SCRIPT_FILES
 
 
 def create_release(output_dir: Path) -> Path:
@@ -60,7 +74,7 @@ def create_release(output_dir: Path) -> Path:
     files_to_package = []
     missing_required = []
 
-    for filename in RELEASE_FILES:
+    for filename in ALL_RELEASE_FILES:
         file_path = SCRIPT_DIR / filename
         if file_path.exists():
             files_to_package.append((filename, file_path))

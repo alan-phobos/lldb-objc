@@ -242,7 +242,7 @@ def main():
     passed, total = run_shared_test_suite(
         "OSEL PERFORMANCE OPTIMIZATION TEST SUITE",
         get_test_specs(),
-        scripts=['objc_sel.py'],
+        scripts=['scripts/objc_sel.py'],
         show_category_summary=categories
     )
 

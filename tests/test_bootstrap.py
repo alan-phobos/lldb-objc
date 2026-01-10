@@ -20,16 +20,16 @@ project_root = os.path.dirname(script_dir)
 # Path to HelloWorld binary
 hello_world_path = os.path.join(project_root, "examples/HelloWorld/HelloWorld/HelloWorld")
 
-# Path to objc_breakpoint.py
-objc_breakpoint_path = os.path.join(project_root, "objc_breakpoint.py")
+# Path to scripts directory
+scripts_dir = os.path.join(project_root, "scripts")
 
 # Verify paths exist
 if not os.path.exists(hello_world_path):
     print(f"Error: HelloWorld binary not found at: {hello_world_path}")
     sys.exit(1)
 
-if not os.path.exists(objc_breakpoint_path):
-    print(f"Error: objc_breakpoint.py not found at: {objc_breakpoint_path}")
+if not os.path.exists(scripts_dir):
+    print(f"Error: scripts directory not found at: {scripts_dir}")
     sys.exit(1)
 
 print(f"Launching LLDB with {hello_world_path}")

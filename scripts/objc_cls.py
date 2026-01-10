@@ -1664,10 +1664,10 @@ def get_all_classes(
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the module by registering the command."""
+    module_path = f"{__name__}.find_objc_classes"
     debugger.HandleCommand(
         'command script add -h "Find Objective-C classes. '
         'Usage: ocls [pattern] [--reload] [--clear-cache] [--verbose]" '
-        '-f objc_cls.find_objc_classes ocls'
+        f'-f {module_path} ocls'
     )
-    print(f"[lldb-objc v{__version__}] Objective-C class finder command 'ocls' has been installed.")
-    print("Usage: ocls [pattern]")
+    print(f"[lldb-objc v{__version__}] 'ocls' installed - Find Objective-C classes by pattern")

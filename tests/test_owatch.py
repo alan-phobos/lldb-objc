@@ -323,7 +323,7 @@ def main():
     passed, total = run_shared_test_suite(
         "OWATCH COMMAND TEST SUITE",
         get_test_specs(),
-        scripts=['objc_watch.py'],
+        scripts=['scripts/objc_watch.py'],
         show_category_summary=categories
     )
     sys.exit(0 if passed == total else 1)

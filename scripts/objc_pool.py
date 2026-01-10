@@ -244,7 +244,8 @@ def find_pool_instances_command(
 
 def __lldb_init_module(debugger: lldb.SBDebugger, internal_dict: Dict[str, Any]) -> None:
     """Initialize the opool command when this module is loaded in LLDB."""
+    module_path = f"{__name__}.find_pool_instances_command"
     debugger.HandleCommand(
-        'command script add -f objc_pool.find_pool_instances_command opool'
+        f'command script add -f {module_path} opool'
     )
-    print(f"[lldb-objc v{__version__}] Autorelease pool scanner 'opool' has been installed.")
+    print(f"[lldb-objc v{__version__}] 'opool' installed - Find instances in autorelease pools")
